@@ -73,7 +73,7 @@ const [emergencyStatus, setEmergencyStatus] =
   const fetchStats = async () => {
     try {
       const res = await axios.get(
-        "http://localhost:5000/api/stats"
+        "https://trafficmind-ai.onrender.com/api/stats"
       );
 
       setStats(res.data);
@@ -85,7 +85,7 @@ const [emergencyStatus, setEmergencyStatus] =
   const fetchAIStatus = async () => {
   try {
     const res = await axios.get(
-      "http://localhost:5000/api/signal/status"
+      "https://trafficmind-ai.onrender.com/api/signal/status"
     );
 
     setAiStatus(res.data);
@@ -98,11 +98,11 @@ const [emergencyStatus, setEmergencyStatus] =
 const fetchTrafficControl = async () => {
   try {
     const signalRes = await axios.get(
-      "http://localhost:5000/api/signal/status"
+      "https://trafficmind-ai.onrender.com/api/signal/status"
     );
 
     const laneRes = await axios.get(
-      "http://localhost:5000/api/smart-signal/multi-lane"
+      "https://trafficmind-ai.onrender.com/api/smart-signal/multi-lane"
     );
 
     setTrafficControl({
@@ -118,7 +118,7 @@ const fetchTrafficControl = async () => {
 const fetchEmergencyStatus = async () => {
   try {
     const res = await axios.get(
-      "http://localhost:5000/api/emergency/status"
+      "https://trafficmind-ai.onrender.com/api/emergency/status"
     );
 
     setEmergencyStatus(res.data);
@@ -131,7 +131,7 @@ const fetchEmergencyStatus = async () => {
 const fetchIncidentStatus = async () => {
   try {
     const res = await axios.get(
-      "http://localhost:5000/api/incident-detection/status"
+      "https://trafficmind-ai.onrender.com/api/incident-detection/status"
     );
 
     setIncidentStatus(res.data);
@@ -144,7 +144,7 @@ const fetchIncidentStatus = async () => {
 const fetchLatestAlert = async () => {
   try {
     const res = await axios.get(
-      "http://localhost:5000/api/alerts/latest"
+      "https://trafficmind-ai.onrender.com/api/alerts/latest"
     );
 
     setLatestAlert(res.data);

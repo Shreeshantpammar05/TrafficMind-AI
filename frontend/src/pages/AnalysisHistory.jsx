@@ -30,7 +30,7 @@ function AnalysisHistory() {
     try {
 
       const res = await axios.get(
-        "http://localhost:5000/api/analysis"
+        "https://trafficmind-ai.onrender.com/api/analysis"
       );
 
       setAnalyses(

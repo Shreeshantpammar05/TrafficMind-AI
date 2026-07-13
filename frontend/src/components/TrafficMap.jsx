@@ -105,7 +105,7 @@ useEffect(() => {
   const fetchZones = async () => {
     try {
       const res = await axios.get(
-        "http://localhost:5000/api/map-zones"
+        "https://trafficmind-ai.onrender.com/api/map-zones"
       );
 
       setZones(res.data.incidents);

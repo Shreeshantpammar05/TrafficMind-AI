@@ -24,7 +24,7 @@ function PredictionDashboard() {
     try {
 
       const res = await axios.get(
-        "http://localhost:5000/api/prediction"
+        "https://trafficmind-ai.onrender.com/api/prediction"
       );
 
       setPrediction(res.data);

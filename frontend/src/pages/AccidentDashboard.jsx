@@ -22,7 +22,7 @@ function AccidentDashboard() {
   const fetchData = async () => {
 
     const res = await axios.get(
-      "http://localhost:5000/api/accident/status"
+      "https://trafficmind-ai.onrender.com/api/accident/status"
     );
 
     setData(res.data);

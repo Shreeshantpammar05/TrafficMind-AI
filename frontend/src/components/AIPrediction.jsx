@@ -15,7 +15,7 @@ function AIPrediction() {
       const hour = Number(time.split(":")[0]);
 
       const aiRes = await axios.post(
-        "http://localhost:5000/api/ai-predict",
+        "https://trafficmind-ai.onrender.com/api/ai-predict",
         {
           vehicles: Number(vehicles),
           time: hour,
@@ -36,7 +36,7 @@ Weather: ${weather}
       `);
 
       await axios.post(
-        "http://localhost:5000/api/predictions",
+        "https://trafficmind-ai.onrender.com/api/predictions",
         {
           area,
           vehicleCount: Number(vehicles),

@@ -19,7 +19,7 @@ function MultiLaneDashboard() {
   const fetchData = async () => {
     try {
       const res = await axios.get(
-        "http://localhost:5000/api/smart-signal/multi-lane"
+        "https://trafficmind-ai.onrender.com/api/smart-signal/multi-lane"
       );
 
       setData(res.data);

@@ -7,7 +7,7 @@ function DemoControlCenter() {
     try {
 
       await axios.post(
-        "http://localhost:5000/api/live-update",
+        "https://trafficmind-ai.onrender.com/api/live-update",
         {
           vehicleCount: 25,
           congestion: "HIGH",
@@ -30,7 +30,7 @@ function DemoControlCenter() {
   try {
 
     await axios.post(
-      "http://localhost:5000/api/live-update",
+      "https://trafficmind-ai.onrender.com/api/live-update",
       {
         vehicleCount: 35,
         congestion: "HIGH",
@@ -54,7 +54,7 @@ function DemoControlCenter() {
   try {
 
     await axios.post(
-      "http://localhost:5000/api/live-update",
+      "https://trafficmind-ai.onrender.com/api/live-update",
       {
         vehicleCount: 20,
         congestion: "MEDIUM",
@@ -78,7 +78,7 @@ function DemoControlCenter() {
   try {
 
     await axios.post(
-      "http://localhost:5000/api/live-update",
+      "https://trafficmind-ai.onrender.com/api/live-update",
       {
         vehicleCount: 0,
         congestion: "LOW",

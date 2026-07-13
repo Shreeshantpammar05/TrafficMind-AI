@@ -11,7 +11,7 @@ function PredictionHistory() {
   const fetchPredictions = async () => {
     try {
       const res = await axios.get(
-        "http://localhost:5000/api/predictions"
+        "https://trafficmind-ai.onrender.com/api/predictions"
       );
 
       setPredictions(res.data.predictions);

@@ -26,7 +26,7 @@ function SmartSignalDashboard() {
     try {
 
       const res = await axios.get(
-        "http://localhost:5000/api/signal/status"
+        "https://trafficmind-ai.onrender.com/api/signal/status"
       );
 
       setSignalData(res.data);

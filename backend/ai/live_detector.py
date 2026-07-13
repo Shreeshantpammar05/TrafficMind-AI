@@ -151,7 +151,7 @@ while True:
     try:
 
         requests.post(
-            "http://localhost:5000/api/live-update",
+            "https://trafficmind-ai.onrender.com/api/live-update",
             json={
                 "vehicleCount": vehicle_count,
                 "congestion": congestion,

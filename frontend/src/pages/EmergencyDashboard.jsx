@@ -22,7 +22,7 @@ function EmergencyDashboard() {
   const fetchData = async () => {
 
     const res = await axios.get(
-      "http://localhost:5000/api/emergency/status"
+      "https://trafficmind-ai.onrender.com/api/emergency/status"
     );
 
     setData(res.data);

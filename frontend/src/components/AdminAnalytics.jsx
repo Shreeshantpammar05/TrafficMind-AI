@@ -16,11 +16,11 @@ function AdminAnalytics() {
   const fetchAnalytics = async () => {
     try {
       const incidentsRes = await axios.get(
-        "http://localhost:5000/api/incidents"
+        "https://trafficmind-ai.onrender.com/api/incidents"
       );
 
       const predictionsRes = await axios.get(
-        "http://localhost:5000/api/predictions"
+        "https://trafficmind-ai.onrender.com/api/predictions"
       );
 
       const incidents =

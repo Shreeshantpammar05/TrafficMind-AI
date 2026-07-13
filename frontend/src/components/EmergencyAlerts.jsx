@@ -20,7 +20,7 @@ function EmergencyAlerts() {
   const fetchAlerts = async () => {
     try {
       const res = await axios.get(
-        "http://localhost:5000/api/incidents"
+        "https://trafficmind-ai.onrender.com/api/incidents"
       );
 
       const highSeverity =

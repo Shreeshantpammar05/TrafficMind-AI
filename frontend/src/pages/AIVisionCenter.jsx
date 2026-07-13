@@ -40,7 +40,7 @@ function AIVisionCenter() {
     );
 
     await axios.post(
-      "http://localhost:5000/api/upload/image",
+      "https://trafficmind-ai.onrender.com/api/upload/image",
       formData
     );
 
@@ -49,13 +49,13 @@ function AIVisionCenter() {
     if (fileType === "video") {
 
       res = await axios.get(
-        "http://localhost:5000/api/video/analyze-video"
+        "https://trafficmind-ai.onrender.com/api/video/analyze-video"
       );
 
     } else {
 
       res = await axios.get(
-        "http://localhost:5000/api/ai/analyze"
+        "https://trafficmind-ai.onrender.com/api/ai/analyze"
       );
 
     }
@@ -65,7 +65,7 @@ function AIVisionCenter() {
    if (res.data.accidentDetected) {
   try {
     await axios.post(
-      "http://localhost:5000/api/incidents",
+      "https://trafficmind-ai.onrender.com/api/incidents",
       {
         location: "AI Surveillance",
         incidentType: "Accident",
@@ -86,7 +86,7 @@ function AIVisionCenter() {
 }
 
     const resultImage =
-      "http://localhost:5000/results/annotated_result.jpg?t=" +
+      "https://trafficmind-ai.onrender.com/results/annotated_result.jpg?t=" +
       Date.now();
 
     setImageUrl(resultImage);

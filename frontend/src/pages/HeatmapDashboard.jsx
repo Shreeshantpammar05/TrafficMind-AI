@@ -17,7 +17,7 @@ function HeatmapDashboard() {
   const fetchData = async () => {
 
     const res = await axios.get(
-      "http://localhost:5000/api/heatmap"
+      "https://trafficmind-ai.onrender.com/api/heatmap"
     );
 
     setLocations(res.data);

@@ -16,7 +16,7 @@ function AdminCenter() {
 const fetchGovernmentUsers = async () => {
   try {
     const res = await axios.get(
-      "http://localhost:5000/api/government-users"
+      "https://trafficmind-ai.onrender.com/api/government-users"
     );
 
     setGovernmentUsers(res.data);
@@ -28,7 +28,7 @@ const fetchGovernmentUsers = async () => {
 const approveUser = async (id) => {
   try {
     await axios.put(
-      `http://localhost:5000/api/government-users/${id}/approve`
+      `https://trafficmind-ai.onrender.com/api/government-users/${id}/approve`
     );
 
     fetchGovernmentUsers();
@@ -40,7 +40,7 @@ const approveUser = async (id) => {
 const rejectUser = async (id) => {
   try {
     await axios.put(
-      `http://localhost:5000/api/government-users/${id}/reject`
+      `https://trafficmind-ai.onrender.com/api/government-users/${id}/reject`
     );
 
     fetchGovernmentUsers();

@@ -20,7 +20,7 @@ function IncidentList() {
   const fetchIncidents = async () => {
     try {
       const res = await axios.get(
-        "http://localhost:5000/api/incidents"
+        "https://trafficmind-ai.onrender.com/api/incidents"
       );
 
       setIncidents(res.data.incidents);
