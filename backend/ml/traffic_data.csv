@@ -1,0 +1,11 @@
+vehicles,time,weather,risk
+100,10,Sunny,Low
+200,11,Sunny,Low
+300,12,Sunny,Low
+400,15,Sunny,Medium
+500,16,Sunny,Medium
+600,17,Rain,Medium
+700,18,Rain,High
+800,18,Rain,High
+900,19,Rain,High
+1000,19,Rain,High

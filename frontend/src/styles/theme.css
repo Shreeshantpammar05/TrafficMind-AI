@@ -1,0 +1,30 @@
+:root {
+  --bg-primary: #0b1220;
+  --bg-secondary: #111827;
+  --card-bg: #1e293b;
+
+  --text-primary: #ffffff;
+  --text-secondary: #94a3b8;
+
+  --blue: #3b82f6;
+  --green: #22c55e;
+  --red: #ef4444;
+  --yellow: #f59e0b;
+
+  --border: rgba(255,255,255,0.08);
+
+  --radius: 18px;
+
+  --shadow:
+    0 10px 30px rgba(0,0,0,0.3);
+}
+
+body {
+  margin: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family:
+    Inter,
+    system-ui,
+    sans-serif;
+}
