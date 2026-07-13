@@ -143,7 +143,27 @@ npm run dev
 
 # 📸 Screenshots
 
-> Screenshots will be added soon.
+## 🔐 Login Page
+
+![Login Page](docs/screenshots/login-page.png)
+
+---
+
+## 🏠 Command Center
+
+![Command Center](docs/screenshots/command-center.png)
+
+---
+
+## 🤖 AI Vision Center
+
+![AI Vision Center](docs/screenshots/ai-vision-center.png)
+
+---
+
+## 🚑 Emergency Center
+
+![Emergency Center](docs/screenshots/emergency-center.png)
 
 ---
 
