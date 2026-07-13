@@ -35,6 +35,8 @@ const analysisRoutes =
   const alertRoutes =
   require("./routes/alertRoutes");
 
+  const nearbyServicesRoutes = require("./routes/nearbyServices");
+
 const io = new Server(server, {
   cors: {
     origin: "*",
@@ -128,6 +130,8 @@ app.use(
 );
 
 app.use("/api/alerts", alertRoutes);
+
+app.use("/api", nearbyServicesRoutes);
 
 console.log("URI exists:", !!process.env.MONGO_URI);
 

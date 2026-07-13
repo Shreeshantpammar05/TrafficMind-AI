@@ -122,21 +122,14 @@ if (emergencyType === "Fire Truck") {
   emergencyTypeTag = "fire_station";
 }
 
-const overpassQuery = `
-[out:json];
-node
-  ["amenity"="${emergencyTypeTag}"]
-  (around:5000,${latitude},${longitude});
-out;
-`;
+
 
 const nearbyRes = await axios.post(
-  "https://overpass-api.de/api/interpreter",
-  overpassQuery,
+  "https://trafficmind-ai.onrender.com/api/nearby-services",
   {
-    headers: {
-      "Content-Type": "text/plain",
-    },
+    latitude,
+    longitude,
+    emergencyTypeTag,
   }
 );
 
