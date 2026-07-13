@@ -42,16 +42,13 @@ function App() {
    <BrowserRouter>
   <Routes>
 
+    <Route path="/" element={<Login />} />
+<Route path="/login" element={<Login />} />
+<Route path="/register" element={<Register />} />
+
     {/* Command Center = Home */}
 
-    <Route
-  path="/"
-  element={
-    <ProtectedRoute>
-      <Dashboard />
-    </ProtectedRoute>
-  }
-/>
+    
 
     {/* Dashboard */}
 
@@ -252,15 +249,7 @@ function App() {
 />
 
 
-    <Route
-      path="/login"
-      element={<Login />}
-    />
-
-    <Route
-      path="/register"
-      element={<Register />}
-    />
+   
 
   </Routes>
 </BrowserRouter>
