@@ -44,9 +44,21 @@ const io = new Server(server, {
 const aiRoutes =
   require("./routes/aiRoutes");
 
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://traffic-mind-ai-gamma.vercel.app",
+  "https://traffic-mind-ai-git-main-shreeshantpammar-7302s-projects.vercel.app",
+];
+
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "http://localhost:5173",
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
   })
 );
