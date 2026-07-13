@@ -1,6 +1,6 @@
 import { useState } from "react";
 import axios from "axios";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 
 function Login() {
    const navigate = useNavigate();
@@ -153,6 +153,36 @@ localStorage.setItem(
       </form>
 
       <div
+  style={{
+    marginTop: "20px",
+    textAlign: "center",
+  }}
+>
+  <p
+    style={{
+      color: "#94a3b8",
+      marginBottom: "8px",
+    }}
+  >
+    Don't have an account?
+  </p>
+
+  <Link
+    to="/register"
+    style={{
+      color: "#3b82f6",
+      fontWeight: "600",
+      textDecoration: "none",
+      fontSize: "15px",
+    }}
+  >
+    Create New Account
+  </Link>
+</div>
+
+
+
+      <div
         style={{
           marginTop: "25px",
           textAlign: "center",
@@ -167,4 +197,4 @@ localStorage.setItem(
 );
 }
 
-export default Login;
+export default 🔐 Login;
