@@ -1,5 +1,9 @@
 <div align="center">
 
+<p align="center">
+  <img src="docs/images/banner.png" width="100%">
+</p>
+
 # 🚦 TrafficMind AI
 
 ### AI-Powered Smart Traffic Management System
