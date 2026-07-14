@@ -14,9 +14,15 @@ function NotificationPanel() {
 
   const fetchNotifications = async () => {
     try {
-      const res = await axios.get(
-        "https://trafficmind-ai.onrender.com/api/notifications"
-      );
+      const res = await fetch(
+  "https://trafficmind-ai.onrender.com/api/notifications"
+);
+
+const data = await res.json();
+
+console.log(data);
+
+setNotifications(data.notifications);
 
       setNotifications(res.data.notifications);
     } catch (error) {
