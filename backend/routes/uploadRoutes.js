@@ -5,7 +5,6 @@ const path = require("path");
 
 const router = express.Router();
 
-// Create uploads folder if it doesn't exist
 const uploadDir = path.join(__dirname, "../uploads");
 
 if (!fs.existsSync(uploadDir)) {
@@ -18,24 +17,24 @@ const storage = multer.diskStorage({
   },
 
   filename: (req, file, cb) => {
-    cb(
-      null,
-      Date.now() + "-" + file.originalname
-    );
+    cb(null, Date.now() + "-" + file.originalname);
   },
 });
 
 const upload = multer({ storage });
 
-router.post(
-  "/image",
-  upload.single("image"),
-  (req, res) => {
-    res.json({
-      success: true,
-      file: req.file,
-    });
-  }
-);
+router.post("/image", upload.single("image"), (req, res) => {
+
+  console.log("========== FILE UPLOADED ==========");
+  console.log(req.file);
+  console.log("Exists:", fs.existsSync(req.file.path));
+  console.log("Path:", req.file.path);
+
+  res.json({
+    success: true,
+    file: req.file,
+  });
+
+});
 
 module.exports = router;

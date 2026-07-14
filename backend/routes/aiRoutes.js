@@ -8,8 +8,13 @@ const latestDetection =
   
 
 router.get("/analyze", (req, res) => {
-  exec(
-  "python ai/traffic_detector.py",
+ const pythonCommand =
+  process.platform === "win32"
+    ? "python"
+    : "python3";
+
+exec(
+  `${pythonCommand} ai/traffic_detector.py`,
   (error, stdout, stderr) => {
 
     console.log("STDOUT:", stdout);
@@ -24,21 +29,16 @@ router.get("/analyze", (req, res) => {
     }
 
     try {
-      const result =
-        JSON.parse(stdout);
+      const result = JSON.parse(stdout);
 
       res.json(result);
 
     } catch (err) {
 
-      console.log(
-        "JSON PARSE ERROR:",
-        err
-      );
+      console.log("JSON PARSE ERROR:", err);
 
       res.status(500).json({
-        error:
-          "Failed to parse AI output",
+        error: "Failed to parse AI output",
       });
     }
   }

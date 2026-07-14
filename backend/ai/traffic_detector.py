@@ -29,6 +29,12 @@ files = sorted(
     reverse=True
 )
 
+if len(files) == 0:
+    print(json.dumps({
+        "error": "No uploaded image found"
+    }))
+    sys.exit()
+
 image_path = files[0]
 
 results = model(
