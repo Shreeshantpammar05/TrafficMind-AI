@@ -1,8 +1,10 @@
+import BackButton from "../components/BackButton";
 import MainLayout from "../layouts/MainLayout";
 
 function GreenCorridor() {
   return (
     <MainLayout>
+      <BackButton />
       <div className="dashboard">
 
         <div className="hero-header">

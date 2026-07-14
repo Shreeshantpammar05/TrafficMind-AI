@@ -16,18 +16,20 @@ out;
 `;
 
     const response = await axios.post(
-      "https://overpass-api.de/api/interpreter",
-      overpassQuery,
-      {
-        headers: {
-          "Content-Type": "text/plain",
-        },
-      }
-    );
+  "https://overpass.kumi.systems/api/interpreter",
+  overpassQuery,
+  {
+    timeout: 15000,
+    headers: {
+      "Content-Type": "text/plain",
+    },
+  }
+);
 
     res.json(response.data);
   } catch (error) {
-    console.error(error.message);
+    console.error(error.response?.data);
+console.error(error.message);
 
     res.status(500).json({
       success: false,

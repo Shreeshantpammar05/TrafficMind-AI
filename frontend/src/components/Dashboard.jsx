@@ -225,7 +225,7 @@ fetchLatestAlert();
     background:
       "linear-gradient(135deg,#1E3A8A,#2563EB,#38BDF8)",
    borderRadius: "18px",
-    padding: "24px 30px",
+    padding: "18px 2px",
     marginBottom: "30px",
     display: "flex",
     justifyContent: "space-between",
@@ -234,46 +234,40 @@ fetchLatestAlert();
     boxShadow: "0 10px 30px rgba(37,99,235,.35)",
   }}
 >
-  <div>
-    <h1
-      style={{
-        margin: 0,
-        fontSize: "34px",
-        fontWeight: "800",
-      }}
-    >
-      👋 Welcome Back
-    </h1>
+  <div
+  style={{
+    maxWidth: "460px",   // 👈 makes the Welcome section smaller
+  }}
+>
+  <h1
+    style={{
+      margin: 0,
+      fontSize: "30px",
+      fontWeight: "800",
+      lineHeight: "1.2",
+    }}
+  >
+    👋 Welcome Back
+  </h1>
 
-    <h2
-      style={{
-        marginTop: "6px",
-        marginBottom: "6px",
-        fontWeight: "700",
-        fontSize: "24px",
-      }}
-    >
-      
-    </h2>
-
-    <p
-      style={{
-        color: "#E2E8F0",
-        fontSize: "15px",
-        lineHeight: "1.6",
-        maxWidth: "500px",
-      }}
-    >
-      Monitor live traffic, emergency operations, AI surveillance,
-      and smart city analytics from one centralized dashboard.
-    </p>
-  </div>
-
+  <p
+    style={{
+      marginTop: "8px",
+      color: "#E2E8F0",
+      fontSize: "15px",
+      lineHeight: "1.5",
+    }}
+  >
+    Monitor live traffic, emergency operations, AI surveillance,
+    and smart city analytics from one centralized dashboard.
+    
+  </p>
+</div>
   <div
     style={{
       background: "rgba(255,255,255,.15)",
       padding: "14px 18px",
-      borderRadius: "18px",
+      borderRadius: "14px",
       textAlign: "center",
       backdropFilter: "blur(10px)",
     }}

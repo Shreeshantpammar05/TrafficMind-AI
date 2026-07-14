@@ -1,3 +1,4 @@
+import BackButton from "../components/BackButton";
 import Select from "react-select";
 import axios from "axios";
 import TrafficMap from "../components/TrafficMap";
@@ -5,43 +6,9 @@ import { useState } from "react";
 import MainLayout from "../layouts/MainLayout";
 
 
-const predefinedLocations = {
-  "MG Road": [77.6097, 12.9756],
-  Hebbal: [77.5970, 13.0358],
-  Whitefield: [77.7499, 12.9698],
-  "Electronic City": [77.6603, 12.8456],
-  Hesaraghatta: [77.4727, 13.1090],
-  Chikkabanavara: [77.5054, 13.0785],
-  "KR Puram": [77.6964, 13.0167],
-  Airport: [77.7066, 13.1986],
-};
 
-const locationOptions = [
-  {
-    value: "MG Road",
-    label: "MG Road, Bengaluru",
-  },
-  {
-    value: "Whitefield",
-    label: "Whitefield, Bengaluru",
-  },
-  {
-    value: "Hebbal",
-    label: "Hebbal, Bengaluru",
-  },
-  {
-    value: "Electronic City",
-    label: "Electronic City, Bengaluru",
-  },
-  {
-    value: "Hesaraghatta",
-    label: "Hesaraghatta, Bengaluru",
-  },
-  {
-    value: "Chikkabanavara",
-    label: "Chikkabanavara, Bengaluru",
-  },
-];
+
+
 
 
 function EmergencyResponse() {
@@ -76,14 +43,24 @@ useState([]);
   "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImUyNzBlNDU4YjU4MTQwMWJhNmRkZTFjZmUxODgwMjJmIiwiaCI6Im11cm11cjY0In0=";
 
  const getCoordinates = async (place) => {
+  const response = await axios.get(
+    "https://api.openrouteservice.org/geocode/search",
+    {
+      params: {
+        api_key: API_KEY,
+        text: place,
+        size: 1,
+      },
+    }
+  );
 
-  if (predefinedLocations[place]) {
-    return predefinedLocations[place];
+  const features = response.data.features;
+
+  if (!features || features.length === 0) {
+    throw new Error("Location not found");
   }
 
-  throw new Error(
-    "Location not supported"
-  );
+  return features[0].geometry.coordinates;
 };
 
  const generateResponse = async () => {
@@ -124,18 +101,25 @@ if (emergencyType === "Fire Truck") {
 
 
 
-const nearbyRes = await axios.post(
-  "https://trafficmind-ai.onrender.com/api/nearby-services",
-  {
-    latitude,
-    longitude,
-    emergencyTypeTag,
-  }
-);
+try {
+  const nearbyRes = await axios.post(
+    "https://trafficmind-ai.onrender.com/api/nearby-services",
+    {
+      latitude,
+      longitude,
+      emergencyTypeTag,
+    }
+  );
 
-setNearbyServices(
-  nearbyRes.data.elements.slice(0, 5)
-);
+  setNearbyServices(
+    nearbyRes.data.elements.slice(0, 5)
+  );
+
+} catch (error) {
+  console.log("Nearby services not available");
+
+  setNearbyServices([]);
+}
 
   const endCoordinate =
   await getCoordinates(destination);
@@ -221,6 +205,7 @@ Airport
 
   return (
     <MainLayout>
+      <BackButton />
       <h1
   style={{
     textAlign: "center",
@@ -305,23 +290,37 @@ Airport
         <br />
         <br />
 
-      <Select
-  options={locationOptions}
-  placeholder="Search Start Location..."
-  onChange={(selected) =>
-    setStart(selected.value)
-  }
+     <input
+  type="text"
+  placeholder="Enter Start Location"
+  value={start}
+  onChange={(e) => setStart(e.target.value)}
+  style={{
+    width: "100%",
+    padding: "12px",
+    borderRadius: "10px",
+    border: "1px solid #334155",
+    background: "#0F172A",
+    color: "white",
+  }}
 />
 
         <br />
         <br />
 
-     <Select
-  options={locationOptions}
-  placeholder="Search Destination..."
-  onChange={(selected) =>
-    setDestination(selected.value)
-  }
+     <input
+  type="text"
+  placeholder="Enter Destination"
+  value={destination}
+  onChange={(e) => setDestination(e.target.value)}
+  style={{
+    width: "100%",
+    padding: "12px",
+    borderRadius: "10px",
+    border: "1px solid #334155",
+    background: "#0F172A",
+    color: "white",
+  }}
 />
         <br />
         <br />

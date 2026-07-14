@@ -1,7 +1,7 @@
 import MainLayout from "../layouts/MainLayout";
 import IncidentForm from "../components/IncidentForm";
 import IncidentList from "../components/IncidentList";
-import NotificationCenter from "../components/NotificationCenter";
+
 
 function IncidentManagement() {
   return (
@@ -132,20 +132,7 @@ function IncidentManagement() {
         </div>
       </div>
 
-      <div
-  className="full-width"
-  style={{
-    marginTop: "20px",
-  }}
->
-
-  <div className="section-card">
-
-    <NotificationCenter />
-
-  </div>
-
-</div>
+     
 
       
     </MainLayout>

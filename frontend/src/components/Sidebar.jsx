@@ -17,7 +17,7 @@ import {
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 
-function Sidebar() {
+function Sidebar({ sidebarOpen }) {
   const location = useLocation();
 
   const [hovered, setHovered] =
@@ -73,7 +73,9 @@ if (
    <div
  
   style={{
-    width: "260px",
+  width: sidebarOpen ? "220px" : "0px",
+  transition: "all .3s ease",
+  overflow: "hidden",
     height: "100vh",
 overflowY: "auto",
 
@@ -87,11 +89,13 @@ overflowY: "auto",
     background:
   "linear-gradient(180deg,#0f172a 0%,#020617 100%)",
     color: "white",
-    padding: "25px",
-    borderRight:
-      "1px solid rgba(255,255,255,0.08)",
-    boxShadow:
-      "5px 0 20px rgba(0,0,0,0.2)",
+    padding: sidebarOpen ? "25px" : "0px",
+    borderRight: sidebarOpen
+  ? "1px solid rgba(255,255,255,0.08)"
+  : "none",
+   boxShadow: sidebarOpen
+  ? "5px 0 20px rgba(0,0,0,0.2)"
+  : "none",
   }}
 >
     <div

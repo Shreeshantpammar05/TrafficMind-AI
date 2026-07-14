@@ -1,3 +1,4 @@
+import BackButton from "../components/BackButton";
 import RouteRecommendation from "../components/RouteRecommendation";
 import WeatherWidget from "../components/WeatherWidget";
 import { Link } from "react-router-dom";
@@ -6,6 +7,7 @@ import MainLayout from "../layouts/MainLayout";
 function TrafficIntelligenceCenter() {
   return (
     <MainLayout>
+      <BackButton />
 
   <div className="hero-header">
 

@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from "react";
 import axios from "axios";
 import MainLayout from "../layouts/MainLayout";
@@ -51,6 +52,7 @@ const rejectUser = async (id) => {
 
   return (
    <MainLayout>
+    
 
   <div className="hero-header">
 

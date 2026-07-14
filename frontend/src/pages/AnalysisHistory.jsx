@@ -1,3 +1,4 @@
+import BackButton from "../components/BackButton";
 import {
   PieChart,
   Pie,
@@ -77,6 +78,7 @@ const COLORS = [
 
   return (
     <MainLayout>
+      <BackButton />
 
       <div className="hero-header">
 

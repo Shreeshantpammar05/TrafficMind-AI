@@ -1,12 +1,13 @@
+import { FaBars } from "react-icons/fa";
 import { FaBell } from "react-icons/fa";
 import { FaExclamationTriangle } from "react-icons/fa";
-import { FaSearch } from "react-icons/fa";
+
 import NotificationPanel from "./NotificationPanel";
 import EmergencyPanel from "./EmergencyPanel";
 import axios from "axios";
 import { useEffect, useState } from "react";
 
-function Navbar() {
+function Navbar({ toggleSidebar, sidebarOpen }) {
   const [currentTime, setCurrentTime] = useState(new Date());
 
   const [alertCount, setAlertCount] = useState(0);
@@ -106,12 +107,13 @@ backdropFilter: "blur(12px)",
 
         position: "fixed",
         top: 0,
-        left: "260px",
-        right: 0,
+        left: sidebarOpen ? "280px" : "0px",
+transition: "all .3s ease",
+        right: 10,
 
-        height: "80px",
+        height: "64px",
 
-        padding: "0 25px",
+        padding: "0px 16px",
 
         display: "flex",
         justifyContent: "space-between",
@@ -129,57 +131,37 @@ backdropFilter: "blur(12px)",
   style={{
     display: "flex",
     alignItems: "center",
-    gap: "30px",
+    gap: "15px",
   }}
 >
-        <h2
-          style={{
-            margin: 0,
-            fontSize: "26px",
-          }}
-        >
-          🚦 TrafficMind AI
-        </h2>
-
-        <div
-          style={{
-            color: "#60a5fa",
-            fontSize: "13px",
-          }}
-        >
-          Smart City Command Center
-        </div>
-      </div>
-
-      <div
-  style={{
-    display: "flex",
-    alignItems: "center",
-    background: "#1E293B",
-    border: "1px solid rgba(255,255,255,.08)",
-    borderRadius: "12px",
-    padding: "10px 15px",
-    width: "320px",
-  }}
->
-  <FaSearch
-    color="#94A3B8"
-    style={{ marginRight: "10px" }}
-  />
-
-  <input
-    type="text"
-    placeholder="Search anything..."
+  <FaBars
+    size={22}
     style={{
-      flex: 1,
-      background: "transparent",
-      border: "none",
-      outline: "none",
+      cursor: "pointer",
       color: "white",
-      fontSize: "14px",
     }}
+    onClick={toggleSidebar}
   />
+
+  <h2
+    style={{
+      margin: 0,
+      fontSize: "26px",
+    }}
+  >
+    🚦 TrafficMind AI
+  </h2>
+
+  <div
+    style={{
+      color: "#60A5FA",
+      fontSize: "13px",
+    }}
+  >
+    Smart City Command Center
+  </div>
 </div>
+     
 
       {/* Right Section */}
 
@@ -326,7 +308,7 @@ backdropFilter: "blur(12px)",
     background: "#1E293B",
     border: "1px solid rgba(255,255,255,0.08)",
     borderRadius: "12px",
-    padding: "10px 16px",
+    padding: "8px 14px",
     minWidth: "170px",
     textAlign: "center",
   }}

@@ -1,3 +1,4 @@
+import BackButton from "../components/BackButton";
 import { useState, useEffect } from "react";
 import axios from "axios";
 import MainLayout from "../layouts/MainLayout";
@@ -45,6 +46,7 @@ function AccidentDashboard() {
 
   return (
     <MainLayout>
+      <BackButton />
 
   <div className="hero-header">
 

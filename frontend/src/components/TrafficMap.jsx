@@ -48,11 +48,9 @@ function TrafficMap({
   const [vehicles, setVehicles] =
   useState([]);
 
-const [ambulance, setAmbulance] =
-  useState(null);
 
-  const [animatedPosition, setAnimatedPosition] =
-  useState(null);
+
+  
 
   useEffect(() => {
     fetchZones();
@@ -68,9 +66,7 @@ const [ambulance, setAmbulance] =
         data.vehicles
       );
 
-      setAmbulance(
-        data.ambulance
-      );
+     
     }
   );
 
@@ -82,25 +78,7 @@ const [ambulance, setAmbulance] =
 
 }, []);
 
-useEffect(() => {
-  if (!routeGeometry || routeGeometry.length === 0) return;
 
-  let index = 0;
-
-  const interval = setInterval(() => {
-    if (index >= routeGeometry.length) {
-      clearInterval(interval);
-      return;
-    }
-
-    setAnimatedPosition(routeGeometry[index]);
-
-    index++;
-  }, 150);
-
-  return () => clearInterval(interval);
-
-}, [routeGeometry]);
 
   const fetchZones = async () => {
     try {
@@ -189,18 +167,7 @@ const incidents = [
   </Marker>
 ))}
 
-{ambulance && (
-  <Marker
-    position={[
-      ambulance.lat,
-      ambulance.lng,
-    ]}
-  >
-    <Popup>
-      🚑 Live Ambulance
-    </Popup>
-  </Marker>
-)}
+
 
 {incidents.map((incident) => (
   <Marker
@@ -219,11 +186,7 @@ const incidents = [
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
-        {animatedPosition && (
-  <FollowAmbulance
-    position={animatedPosition}
-  />
-)}
+        
 
         {routeGeometry &&
   routeGeometry.length > 0 && (
@@ -288,24 +251,16 @@ const incidents = [
 
         {startCoords && endCoords && (
   <>
-   {animatedPosition ? (
-  <Marker position={animatedPosition}>
-    <Popup>
-      🚑 Ambulance
-    </Popup>
-  </Marker>
-) : (
-  <Marker
-    position={[
-      startCoords[1],
-      startCoords[0],
-    ]}
-  >
-    <Popup>
-      🚑 Start Location
-    </Popup>
-  </Marker>
-)}
+   <Marker
+  position={[
+    startCoords[1],
+    startCoords[0],
+  ]}
+>
+  <Popup>
+    🚑 Start Location
+  </Popup>
+</Marker>
 
     <Marker
       position={[

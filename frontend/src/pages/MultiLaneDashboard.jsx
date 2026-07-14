@@ -1,3 +1,4 @@
+import BackButton from "../components/BackButton";
 import { useState, useEffect } from "react";
 import axios from "axios";
 import MainLayout from "../layouts/MainLayout";
@@ -31,6 +32,7 @@ function MultiLaneDashboard() {
   if (!data) {
     return (
       <MainLayout>
+        
         <h2>Loading Multi-Lane Data...</h2>
       </MainLayout>
     );
@@ -38,6 +40,7 @@ function MultiLaneDashboard() {
 
   return (
     <MainLayout>
+      <BackButton />
       <h1
         style={{
           textAlign: "center",

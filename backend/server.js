@@ -1,3 +1,4 @@
+const notificationRoutes = require("./routes/notificationRoutes");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
@@ -6,6 +7,7 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const Incident = require("./models/Incident");
+const Notification = require("./models/Notification");
 const { PythonShell } = require("python-shell");
 const path = require("path");
 const User = require("./models/User");
@@ -51,6 +53,8 @@ const allowedOrigins = [
   "https://traffic-mind-ai-gamma.vercel.app",
   "https://traffic-mind-ai-git-main-shreeshantpammar-7302s-projects.vercel.app",
 ];
+
+app.use("/api/notifications", notificationRoutes);
 
 app.use(
   cors({
@@ -221,6 +225,16 @@ app.post("/api/incidents", async (req, res) => {
     const incident = new Incident(req.body);
 
     await incident.save();
+
+    // Save notification
+    await Notification.create({
+      title: "🚨 New Incident",
+      message: `${incident.incidentType} reported at ${incident.location}`,
+      type: incident.severity,
+      isRead: false,
+    });
+
+    // Live Socket
     io.emit("newIncident", incident);
 
     res.status(201).json({
@@ -228,6 +242,7 @@ app.post("/api/incidents", async (req, res) => {
       message: "Incident Report Saved",
       incident,
     });
+
   } catch (error) {
     res.status(500).json({
       success: false,

@@ -1,9 +1,11 @@
+import BackButton from "../components/BackButton";
 import { Link } from "react-router-dom";
 import MainLayout from "../layouts/MainLayout";
 
 function EmergencyCenter() {
   return (
    <MainLayout>
+    <BackButton />
 
   <div className="hero-header">
 

@@ -1,9 +1,11 @@
+import BackButton from "../components/BackButton";
 import MainLayout from "../layouts/MainLayout";
 import { Link } from "react-router-dom";
 
 function TrafficOperations() {
   return (
     <MainLayout>
+      <BackButton />
 
       <div className="hero-header">
         <div>

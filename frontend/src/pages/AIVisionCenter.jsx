@@ -1,3 +1,4 @@
+import BackButton from "../components/BackButton";
 import jsPDF from "jspdf";
 import MainLayout from "../layouts/MainLayout";
 import axios from "axios";
@@ -164,6 +165,7 @@ const downloadReport = () => {
 
   return (
     <MainLayout>
+      <BackButton />
      <div className="hero-header">
   <div>
     <h1>🤖 AI Surveillance Center</h1>

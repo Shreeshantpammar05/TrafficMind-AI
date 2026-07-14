@@ -1,9 +1,11 @@
+import BackButton from "../components/BackButton";
 import AdvancedAnalyticsCharts from "../components/AdvancedAnalyticsCharts";
 import MainLayout from "../layouts/MainLayout";
 
 function AdvancedAnalytics() {
   return (
     <MainLayout>
+      <BackButton />
       <div className="dashboard">
 
         <div className="hero-header">
