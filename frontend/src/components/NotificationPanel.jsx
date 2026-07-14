@@ -13,22 +13,24 @@ function NotificationPanel() {
   }, []);
 
   const fetchNotifications = async () => {
-    try {
-      const res = await fetch(
-  "https://trafficmind-ai.onrender.com/api/notifications"
-);
+  try {
+    const res = await fetch(
+      "https://trafficmind-ai.onrender.com/api/notifications"
+    );
 
-const data = await res.json();
-
-console.log(data);
-
-setNotifications(data.notifications);
-
-      setNotifications(res.data.notifications);
-    } catch (error) {
-      console.log(error);
+    if (!res.ok) {
+      throw new Error("Failed to fetch notifications");
     }
-  };
+
+    const data = await res.json();
+
+    console.log(data);
+
+    setNotifications(data.notifications || []);
+  } catch (error) {
+    console.log(error);
+  }
+};
 
   return (
     <div

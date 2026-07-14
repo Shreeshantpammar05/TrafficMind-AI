@@ -163,6 +163,7 @@ const downloadReport = () => {
   );
 };
 
+
   return (
     <MainLayout>
       <BackButton />
@@ -721,52 +722,50 @@ and smart city surveillance.
         <br />
         <br />
 
-        <button
-  onClick={analyzeTraffic}
-  disabled={loading}
+       <div
   style={{
-    background: "#2563eb",
-    color: "white",
-    border: "none",
-    padding: "12px 20px",
-    borderRadius: "10px",
-    cursor: loading
-      ? "not-allowed"
-      : "pointer",
-    fontWeight: "bold",
-    opacity: loading ? 0.7 : 1,
+    display: "flex",
+    gap: "12px",
+    alignItems: "center",
+    marginTop: "10px",
   }}
 >
-  {loading
-    ? "⏳ Analyzing..."
-    : "🚦 Analyze Traffic"}
-</button>
+  <button
+    onClick={analyzeTraffic}
+    disabled={loading}
+    style={{
+      background: "#2563EB",
+      color: "white",
+      border: "none",
+      padding: "12px 20px",
+      borderRadius: "10px",
+      cursor: loading ? "not-allowed" : "pointer",
+      fontWeight: "700",
+    }}
+  >
+    {loading
+      ? "⏳ Analyzing..."
+      : "🚦 Analyze Traffic"}
+  </button>
 
-        <button
-  onClick={downloadReport}
-  disabled={!result}
-   style={{
+  
 
-    background: "#16a34a",
-
-    color: "white",
-
-    border: "none",
-
-    padding: "12px 20px",
-
-    borderRadius: "10px",
-
-    cursor: "pointer",
-
-    fontWeight: "bold",
-
-    marginLeft: "10px",
-
-  }}
->
-  📄 Download Report
-</button>
+  <button
+    onClick={downloadReport}
+    disabled={!result}
+    style={{
+      background: "#16A34A",
+      color: "white",
+      border: "none",
+      padding: "12px 20px",
+      borderRadius: "10px",
+      cursor: "pointer",
+      fontWeight: "700",
+    }}
+  >
+    📄 Download Report
+  </button>
+</div>
 
 
        {result && (

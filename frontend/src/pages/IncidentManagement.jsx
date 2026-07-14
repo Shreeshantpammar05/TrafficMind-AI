@@ -127,9 +127,14 @@ function IncidentManagement() {
           <IncidentForm />
         </div>
 
-        <div className="section-card">
-          <IncidentList />
-        </div>
+        <div
+  className="section-card"
+  style={{
+    height: "650px",
+  }}
+>
+  <IncidentList />
+</div>
       </div>
 
      
