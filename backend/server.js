@@ -50,7 +50,7 @@ const aiRoutes =
 
 
 
-app.use("/api/notifications", notificationRoutes);
+
 
 app.use(
   cors({
@@ -64,6 +64,8 @@ app.use(
 );
 
 app.use(express.json());
+
+app.use("/api/notifications", notificationRoutes);
 
 app.use(
   "/results",
