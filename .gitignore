@@ -66,5 +66,5 @@ backend/ai/models/
 
 # YOLO Models
 *.pt
-backend/ai/ai_models/
+# backend/ai/ai_models/
 backend/yolov8n.pt
