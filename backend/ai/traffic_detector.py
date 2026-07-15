@@ -1,121 +1,158 @@
 import sys
 import os
-from ultralytics import YOLO
 import cv2
 import json
+from ultralytics import YOLO
 
-MODEL_PATH = os.path.join(
-    os.path.dirname(__file__),
-    "ai_models",
-    "yolov8n.pt"
-)
+BASE_DIR = os.path.dirname(__file__)
 
-model = YOLO(MODEL_PATH)
+# -----------------------------
+# Load Models
+# -----------------------------
+vehicle_model = YOLO(os.path.join(BASE_DIR, "ai_models", "yolov8n.pt"))
+accident_model = YOLO(os.path.join(BASE_DIR, "ai_models", "accident_detector.pt"))
 
-import os
-
-uploads_folder = os.path.join(
-    os.path.dirname(__file__),
-    "..",
-    "uploads"
-)
-
-files = sorted(
-    [
-        os.path.join(uploads_folder, f)
-        for f in os.listdir(uploads_folder)
-    ],
-    key=os.path.getmtime,
-    reverse=True
-)
-
-if len(files) == 0:
+# -----------------------------
+# Check Image Path
+# -----------------------------
+if len(sys.argv) < 2:
     print(json.dumps({
-        "error": "No uploaded image found"
+        "success": False,
+        "error": "No image path received"
     }))
     sys.exit()
 
-image_path = files[0]
+image_path = sys.argv[1]
 
-results = model(
-    image_path,
-    verbose=False
-)
+if not os.path.exists(image_path):
+    print(json.dumps({
+        "success": False,
+        "error": "Image not found"
+    }))
+    sys.exit()
 
-annotated_image = results[0].plot()
+# -----------------------------
+# Vehicle Detection
+# -----------------------------
+vehicle_results = vehicle_model(image_path, verbose=False)
 
-output_path = os.path.join(
-    os.path.dirname(__file__),
-    "annotated_result.jpg"
-)
+annotated_image = vehicle_results[0].plot()
 
-cv2.imwrite(
-    output_path,
-    annotated_image
-)
-vehicle_count = 0
-emergency_detected = False
-vehicle_classes = [
-    "car",
-    "truck",
-    "bus",
-    "motorcycle"
-]
+output_path = os.path.join(BASE_DIR, "annotated_result.jpg")
+cv2.imwrite(output_path, annotated_image)
 
-for result in results:
-    for box in result.boxes:
-        cls_id = int(box.cls[0])
-
-        class_name = model.names[cls_id]
-
-        if class_name in vehicle_classes:
-            vehicle_count += 1
-
-        if class_name == "bus":
-            emergency_detected = True
-
-if vehicle_count < 20:
-    congestion = "LOW"
-
-elif vehicle_count < 35:
-    congestion = "MEDIUM"
-
-else:
-    congestion = "HIGH"
-
-if congestion == "HIGH":
-    recommendation = "Deploy Traffic Officers"
-
-elif congestion == "MEDIUM":
-    recommendation = "Monitor Traffic"
-
-else:
-    recommendation = "Traffic Flow Normal"
-
-    # AI Accident Detection
-
-accident_detected = False
-accident_severity = "NONE"
-
-if vehicle_count >= 35:
-    accident_detected = True
-    accident_severity = "HIGH"
-
-elif vehicle_count >= 25:
-    accident_detected = True
-    accident_severity = "MEDIUM"
-
-result = {
-    "vehicleCount": vehicle_count,
-    "congestion": congestion,
-    "recommendation": recommendation,
-
-    "accidentDetected": accident_detected,
-    "accidentSeverity": accident_severity,
-
-    "emergencyDetected": emergency_detected
+vehicle_breakdown = {
+    "car": 0,
+    "truck": 0,
+    "bus": 0,
+    "motorcycle": 0,
+    "person": 0
 }
 
-print(json.dumps(result))
+vehicle_classes = vehicle_breakdown.keys()
+
+vehicle_count = 0
+
+for result in vehicle_results:
+    for box in result.boxes:
+        cls = int(box.cls[0])
+        class_name = vehicle_model.names[cls]
+
+        if class_name in vehicle_classes:
+            vehicle_breakdown[class_name] += 1
+
+            if class_name != "person":
+                vehicle_count += 1
+
+# -----------------------------
+# Traffic Density
+# -----------------------------
+if vehicle_count <= 10:
+    traffic_density = "LOW"
+elif vehicle_count <= 25:
+    traffic_density = "MEDIUM"
+else:
+    traffic_density = "HIGH"
+
+# -----------------------------
+# Accident Detection
+# -----------------------------
+accident_results = accident_model(image_path, verbose=False)
+
+accident_detected = False
+accident_confidence = 0
+
+for result in accident_results:
+    for box in result.boxes:
+
+        cls = int(box.cls[0])
+        confidence = float(box.conf[0])
+
+        class_name = accident_model.names[cls]
+
+        if class_name == "Accident":
+            accident_detected = True
+            accident_confidence = round(confidence * 100, 2)
+
+# -----------------------------
+# Severity
+# -----------------------------
+if accident_detected:
+
+    if accident_confidence >= 90:
+        severity = "HIGH"
+
+    elif accident_confidence >= 70:
+        severity = "MEDIUM"
+
+    else:
+        severity = "LOW"
+
+else:
+    severity = "NONE"
+
+# -----------------------------
+# Recommendations
+# -----------------------------
+recommendations = []
+
+if accident_detected:
+    recommendations.append("Dispatch Ambulance")
+    recommendations.append("Alert Police")
+    recommendations.append("Create Green Corridor")
+
+elif traffic_density == "HIGH":
+    recommendations.append("Increase Green Signal Time")
+    recommendations.append("Deploy Traffic Officers")
+
+elif traffic_density == "MEDIUM":
+    recommendations.append("Monitor Traffic")
+
+else:
+    recommendations.append("Traffic Flow Normal")
+
+# -----------------------------
+# Final JSON
+# -----------------------------
+response = {
+    "success": True,
+
+    "vehicleCount": vehicle_count,
+
+    "vehicleBreakdown": vehicle_breakdown,
+
+    "trafficDensity": traffic_density,
+
+    "accident": {
+        "detected": accident_detected,
+        "confidence": accident_confidence,
+        "severity": severity
+    },
+
+    "recommendations": recommendations,
+
+    "processedImage": output_path
+}
+
+print(json.dumps(response))
 sys.stdout.flush()
-exit()

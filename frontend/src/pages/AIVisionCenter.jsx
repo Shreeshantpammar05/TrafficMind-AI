@@ -4,6 +4,8 @@ import MainLayout from "../layouts/MainLayout";
 import axios from "axios";
 import { useState } from "react";
 
+const BASE_URL = "https://trafficmind-ai.onrender.com";
+
 
 function AIVisionCenter() {
 
@@ -40,33 +42,42 @@ function AIVisionCenter() {
       selectedFile
     );
 
-    await axios.post(
-      "https://trafficmind-ai.onrender.com/api/upload/image",
-      formData
-    );
+   const uploadRes = await axios.post(
+  `${BASE_URL}/api/upload/image`,
+  formData
+);
+
+const imagePath = uploadRes.data.imagePath;
+
+
 
     let res;
 
-    if (fileType === "video") {
+if (fileType === "video") {
 
-      res = await axios.get(
-        "https://trafficmind-ai.onrender.com/api/video/analyze-video"
-      );
+  res = await axios.get(
+    `${BASE_URL}/api/video/analyze-video`
+  );
 
-    } else {
+} else {
 
-      res = await axios.get(
-        "https://trafficmind-ai.onrender.com/api/ai/analyze"
-      );
-
+  res = await axios.get(
+    `${BASE_URL}/api/ai/analyze`,
+    {
+      params: {
+        imagePath,
+      },
     }
+  );
 
-    setResult(res.data);
+}
+
+setResult(res.data);
 
    if (res.data.accidentDetected) {
   try {
     await axios.post(
-      "https://trafficmind-ai.onrender.com/api/incidents",
+  `${BASE_URL}/api/incidents`,
       {
         location: "AI Surveillance",
         incidentType: "Accident",
@@ -86,9 +97,8 @@ function AIVisionCenter() {
   }
 }
 
-    const resultImage =
-      "https://trafficmind-ai.onrender.com/results/annotated_result.jpg?t=" +
-      Date.now();
+   const resultImage =
+  `${BASE_URL}/results/annotated_result.jpg?t=${Date.now()}`;
 
     setImageUrl(resultImage);
 
