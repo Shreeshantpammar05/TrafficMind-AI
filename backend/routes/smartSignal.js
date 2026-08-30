@@ -1,47 +1,36 @@
-const express = require("express");
-const router = express.Router();
+const express =
+  require("express");
 
-router.get("/multi-lane", (req, res) => {
+const router =
+  express.Router();
 
-  const latestDetection =
-  require("../data/latestDetection");
+const {
+  calculateLaneOptimization,
+} = require(
+  "../services/multiLaneService"
+);
 
- const totalVehicles =
-  latestDetection.vehicleCount || 0;
+router.get(
+  "/multi-lane",
+  async (req, res) => {
+    try {
+      const result =
+        await calculateLaneOptimization();
 
-const lanes = {
-  north: Math.round(totalVehicles * 0.4),
-  south: Math.round(totalVehicles * 0.3),
-  east: Math.round(totalVehicles * 0.2),
-  west: Math.round(totalVehicles * 0.1),
-};
+      res.json(result);
+    } catch (error) {
+      console.error(
+        "Multi-Lane Optimization Error:",
+        error
+      );
 
-  const maxLane = Object.keys(lanes).reduce(
-    (a, b) =>
-      lanes[a] > lanes[b] ? a : b
-  );
-
-  let greenTime = {};
-
-Object.keys(lanes).forEach((lane) => {
-
-  if (lanes[lane] < 10) {
-    greenTime[lane] = 15;
+      res.status(500).json({
+        success: false,
+        error:
+          "Failed to generate multi-lane optimization",
+      });
+    }
   }
-  else if (lanes[lane] < 25) {
-    greenTime[lane] = 30;
-  }
-  else {
-    greenTime[lane] = 60;
-  }
-
-});
-
-res.json({
-  lanes,
-  greenTime,
-  priorityLane: maxLane,
-});
-});
+);
 
 module.exports = router;

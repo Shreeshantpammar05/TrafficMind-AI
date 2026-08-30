@@ -3,88 +3,192 @@ import axios from "axios";
 import socket from "../socket";
 
 function NotificationCenter() {
-  const [notifications, setNotifications] =
-    useState([]);
+  const [notifications, setNotifications] = useState([]);
+
+  const API_BASE =
+    import.meta.env.VITE_API_BASE_URL ||
+    "http://localhost:5000";
 
   useEffect(() => {
     fetchNotifications();
 
-    socket.on("newIncident", () => {
+    const handleNewIncident = () => {
       fetchNotifications();
-    });
+    };
+
+    socket.on("newIncident", handleNewIncident);
 
     return () => {
-      socket.off("newIncident");
+      socket.off("newIncident", handleNewIncident);
     };
   }, []);
 
   const fetchNotifications = async () => {
     try {
       const res = await axios.get(
-        "https://trafficmind-ai.onrender.com/api/incidents"
+        `${API_BASE}/api/incidents`,
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem(
+              "token"
+            )}`,
+          },
+        }
       );
 
-      const alerts =
-        res.data.incidents
-          .filter(
-            (item) =>
-              item.severity?.toLowerCase() ===
-              "high"
-          )
-          .slice(0, 5);
+      const incidents = res.data?.incidents || [];
+
+      const alerts = incidents
+        .filter(
+          (item) =>
+            item.severity?.toLowerCase() === "high"
+        )
+        .slice(0, 5);
 
       setNotifications(alerts);
     } catch (error) {
-      console.log(error);
+      console.log(
+        "Notification center error:",
+        error
+      );
+      setNotifications([]);
     }
   };
 
   return (
-    <div
+    <section
       style={{
-        background: "#1e293b",
-        padding: "20px",
-        borderRadius: "15px",
-        color: "white",
+        background: "var(--app-surface)",
+        padding: "22px",
+        borderRadius: "18px",
+        color: "var(--text-primary)",
+        border: "1px solid var(--border)",
+        boxShadow: "var(--shadow)",
+        boxSizing: "border-box",
+        width: "100%",
+        minWidth: 0,
       }}
     >
-      <h2>🔔 Live Notification Center</h2>
-
-      {notifications.length === 0 ? (
-        <p>No Active Alerts</p>
-      ) : (
-        notifications.map((item) => (
-          <div
-            key={item._id}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: "12px",
+          flexWrap: "wrap",
+          marginBottom: "18px",
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <h2
             style={{
-              background: "#334155",
-              padding: "12px",
-              marginTop: "10px",
-              borderRadius: "10px",
-              borderLeft:
-                "4px solid #ef4444",
+              margin: 0,
+              color: "var(--text-primary)",
+              lineHeight: 1.2,
             }}
           >
-            <strong>
-              🚨 High Severity Incident
-            </strong>
+            🔔 Live Notification Center
+          </h2>
 
-            <br />
+          <p
+            style={{
+              margin: "7px 0 0",
+              color: "var(--text-muted)",
+              fontSize: "13px",
+              lineHeight: 1.5,
+            }}
+          >
+            High-severity incidents requiring attention.
+          </p>
+        </div>
 
-            📍 {item.location}
+        <span
+          style={{
+            background: "rgba(239,68,68,.10)",
+            color: "var(--danger)",
+            border: "1px solid rgba(239,68,68,.22)",
+            padding: "7px 11px",
+            borderRadius: "999px",
+            fontSize: "11px",
+            fontWeight: "800",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {notifications.length} ACTIVE
+        </span>
+      </div>
 
-            <br />
-
-            🛣️ {item.type}
-
-            <br />
-
-            ⚠️ Severity:{" "}
-            {item.severity}
+      {notifications.length === 0 ? (
+        <div
+          style={{
+            padding: "28px 16px",
+            textAlign: "center",
+            color: "var(--text-muted)",
+            background: "var(--app-surface-2)",
+            border: "1px dashed var(--border)",
+            borderRadius: "14px",
+          }}
+        >
+          <div style={{ fontSize: "25px", marginBottom: "8px" }}>
+            🔕
           </div>
-        ))
+
+          <strong
+            style={{
+              display: "block",
+              color: "var(--text-primary)",
+              marginBottom: "4px",
+            }}
+          >
+            No Active Alerts
+          </strong>
+
+          <span style={{ fontSize: "13px" }}>
+            New high-severity incidents will appear here.
+          </span>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gap: "10px" }}>
+          {notifications.map((item) => (
+            <article
+              key={item._id}
+              style={{
+                background: "var(--app-surface-2)",
+                padding: "14px",
+                borderRadius: "13px",
+                border: "1px solid rgba(239,68,68,.18)",
+                borderLeft: "4px solid var(--danger)",
+                color: "var(--text-secondary)",
+                lineHeight: 1.6,
+              }}
+            >
+              <strong
+                style={{
+                  color: "var(--text-primary)",
+                  display: "block",
+                  marginBottom: "7px",
+                }}
+              >
+                🚨 High Severity Incident
+              </strong>
+
+              <div>📍 {item.location || "Unknown location"}</div>
+              <div>🛣️ {item.incidentType || "Unknown type"}</div>
+
+              <div
+                style={{
+                  color: "var(--danger)",
+                  fontWeight: "800",
+                  marginTop: "4px",
+                }}
+              >
+                ⚠️ Severity: {item.severity || "HIGH"}
+              </div>
+            </article>
+          ))}
+        </div>
       )}
-    </div>
+    </section>
   );
 }
 

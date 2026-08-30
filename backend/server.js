@@ -8,8 +8,6 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const Incident = require("./models/Incident");
 const Notification = require("./models/Notification");
-const { PythonShell } = require("python-shell");
-const path = require("path");
 const User = require("./models/User");
 const Prediction = require("./models/Prediction");
 const uploadRoutes =
@@ -41,16 +39,82 @@ const analysisRoutes =
 
 const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: [
+      "http://localhost:5173",
+      "https://traffic-mind-ai-gamma.vercel.app",
+      "https://traffic-mind-ai-git-main-shreeshantpammar-7302s-projects.vercel.app",
+    ],
+    methods: ["GET", "POST"],
   },
 });
 
 const aiRoutes =
   require("./routes/aiRoutes");
 
+  const routeRoutes = require("./routes/routeRoutes");
 
 
+const {
+  verifyToken,
+  requireAdmin,
+} = require("./middleware/authMiddleware");
 
+const trafficZoneRoutes =
+  require("./routes/trafficZoneRoutes");
+
+  const trafficRecommendationRoutes =
+  require("./routes/trafficRecommendationRoutes");
+
+  const predictiveTrafficRoutes =
+  require(
+    "./routes/predictiveTrafficRoutes"
+  );
+
+  const trafficCameraRoutes =
+  require("./routes/trafficCameraRoutes");
+
+  const cameraDetectionRoutes =
+  require("./routes/cameraDetectionRoutes");
+
+  const aiEvaluationRoutes =
+  require("./routes/aiEvaluationRoutes");
+
+  const aiDecisionRoutes =
+  require("./routes/aiDecisionRoutes");
+
+  const aiDecisionHistoryRoutes =
+  require("./routes/aiDecisionHistoryRoutes");
+
+  const weatherRoutes =
+  require("./routes/weatherRoutes");
+
+  const citizenTrafficRoutes =
+  require(
+    "./routes/citizenTrafficRoutes"
+  );
+
+  const aiCameraConfigRoutes =
+  require(
+    "./routes/aiCameraConfigRoutes"
+  );
+
+  const emergencyPredictionRoutes =
+  require("./routes/emergencyPredictionRoutes");
+
+  const emergencyRecoveryRoutes =
+  require("./routes/emergencyRecoveryRoutes");
+
+const officerAlertRoutes =
+  require("./routes/officerAlertRoutes");
+
+const emergencyAuditRoutes =
+  require("./routes/emergencyAuditRoutes");
+
+const userRoutes =
+  require("./routes/userRoutes");
+
+  const realCameraRoutes =
+  require("./routes/realCameraRoutes");
 
 app.use(
   cors({
@@ -64,6 +128,103 @@ app.use(
 );
 
 app.use(express.json());
+
+app.use(
+  "/api/real-camera-integration",
+  realCameraRoutes
+);
+
+app.use(
+  "/api/users",
+  userRoutes
+);
+
+app.use(
+  "/api/emergency-audit",
+  emergencyAuditRoutes
+);
+
+app.use(
+  "/api/officer-alerts",
+  officerAlertRoutes
+);
+
+app.use(
+  "/api/emergency-recovery",
+  emergencyRecoveryRoutes
+);
+
+app.use(
+  "/api/emergency-prediction",
+  emergencyPredictionRoutes
+);
+
+app.use(
+  "/api/camera-connections",
+  require("./routes/cameraConnections")
+);
+
+app.use(
+  "/api/ai-camera-config",
+  aiCameraConfigRoutes
+);
+
+app.use(
+  "/api/citizen-traffic",
+  citizenTrafficRoutes
+);
+
+app.use(
+  "/api/routes",
+  routeRoutes
+);
+
+app.use(
+  "/api/weather",
+  weatherRoutes
+);
+
+app.use(
+  "/api/ai-decision-history",
+  aiDecisionHistoryRoutes
+);
+
+app.use(
+  "/api/ai-decision",
+  aiDecisionRoutes
+);
+
+app.use(
+  "/api/ai-evaluations",
+  aiEvaluationRoutes
+);
+
+app.use(
+  "/api/camera-detections",
+  cameraDetectionRoutes
+);
+
+app.use(
+  "/api/traffic-cameras",
+  trafficCameraRoutes
+);
+
+app.use(
+  "/api/traffic-recommendation",
+  trafficRecommendationRoutes
+);
+
+app.use(
+  "/api/predictive-traffic",
+  predictiveTrafficRoutes
+);
+
+app.use(
+  "/api/traffic-zone",
+  trafficZoneRoutes
+);
+
+app.use("/api/routes", routeRoutes);
 
 app.use("/api/notifications", notificationRoutes);
 
@@ -102,14 +263,16 @@ app.use(
   require("./routes/emergency")
 );
 
+
+app.use(
+  "/api/officer-alerts",
+  require("./routes/officerAlertRoutes")
+);
+
+
 app.use(
   "/api/analysis",
   analysisRoutes
-);
-
-app.use(
-  "/api/accident",
-  require("./routes/accident")
 );
 
 app.use(
@@ -117,10 +280,7 @@ app.use(
   require("./routes/prediction")
 );
 
-app.use(
-  "/api/heatmap",
-  require("./routes/heatmap")
-);
+
 
 app.use("/api", liveUpdateRoutes);
 
@@ -148,7 +308,11 @@ app.get("/", (req, res) => {
   res.send("TrafficMind AI Backend Running");
 });
 
-app.get("/api/government-users", async (req, res) => {
+app.get(
+  "/api/government-users",
+  verifyToken,
+  requireAdmin,
+  async (req, res) => {
   try {
     const users = await User.find({
       role: "government",
@@ -164,14 +328,19 @@ app.get("/api/government-users", async (req, res) => {
 
 app.put(
   "/api/government-users/:id/approve",
+  verifyToken,
+  requireAdmin,
   async (req, res) => {
     try {
-      await User.findByIdAndUpdate(
-        req.params.id,
-        {
-          verificationStatus: "approved",
-        }
-      );
+      await User.findOneAndUpdate(
+  {
+    _id: req.params.id,
+    role: "government",
+  },
+  {
+    verificationStatus: "approved",
+  }
+);
 
       res.json({
         success: true,
@@ -187,14 +356,19 @@ app.put(
 
 app.put(
   "/api/government-users/:id/reject",
+  verifyToken,
+  requireAdmin,
   async (req, res) => {
     try {
-      await User.findByIdAndUpdate(
-        req.params.id,
-        {
-          verificationStatus: "rejected",
-        }
-      );
+     await User.findOneAndUpdate(
+  {
+    _id: req.params.id,
+    role: "government",
+  },
+  {
+    verificationStatus: "rejected",
+  }
+);
 
       res.json({
         success: true,
@@ -208,301 +382,536 @@ app.put(
   }
 );
 
-app.get("/api/test", (req, res) => {
-  res.json({
-    success: true,
-    message: "TrafficMind AI Backend Working",
-  });
-});
 
 
-app.post("/api/incidents", async (req, res) => {
-  try {
-    const incident = new Incident(req.body);
 
-    await incident.save();
+app.post(
+  "/api/incidents",
+  verifyToken,
+  async (req, res) => {
+    try {
+      const incident = new Incident(
+        req.body
+      );
 
-    // Save notification
-    await Notification.create({
-      title: "🚨 New Incident",
-      message: `${incident.incidentType} reported at ${incident.location}`,
-      type: incident.severity,
-      isRead: false,
-    });
+      await incident.save();
 
-    // Live Socket
-    io.emit("newIncident", incident);
+      // Save notification
+      await Notification.create({
+        title: "🚨 New Incident",
+        message: `${incident.incidentType} reported at ${incident.location}`,
+        type: incident.severity,
+        isRead: false,
+      });
 
-    res.status(201).json({
-      success: true,
-      message: "Incident Report Saved",
-      incident,
-    });
+      // Live Socket
+      io.emit(
+        "newIncident",
+        incident
+      );
 
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+      res.status(201).json({
+        success: true,
+        message: "Incident Report Saved",
+        incident,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
   }
-});
+);
 
-app.get("/api/incidents", async (req, res) => {
-  try {
-    const incidents = await Incident.find().sort({ createdAt: -1 });
+app.get(
+  "/api/incidents",
+  verifyToken,
+  async (req, res) => {
+    try {
+      const incidents =
+        await Incident.find()
+          .sort({ createdAt: -1 });
 
-    res.json({
-      success: true,
-      incidents,
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+      res.json({
+        success: true,
+        incidents,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
   }
-});
+);
 
-app.get("/api/stats", async (req, res) => {
-  try {
-    const totalIncidents = await Incident.countDocuments();
+app.get(
+  "/api/stats",
+  verifyToken,
+  async (req, res) => {
+    try {
+      const totalIncidents =
+        await Incident.countDocuments();
 
-    const highSeverity = await Incident.countDocuments({
-      severity: "High",
-    });
+      const highSeverity =
+        await Incident.countDocuments({
+          severity: "High",
+        });
 
-    res.json({
-      totalIncidents,
-      highSeverity,
-      aiPredictions: 32,
-      congestedAreas: 9,
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: error.message,
-    });
+      res.json({
+        success: true,
+        totalIncidents,
+        highSeverity,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
   }
-});
-
-let liveData = {
-  vehicleCount: 0,
-  congestion: "LOW",
-  recommendation: "Traffic Flow Normal",
-};
-
-app.post("/api/live-update", (req, res) => {
-  liveData = req.body;
-
-  res.json({
-    success: true,
-  });
-});
-
-app.get("/api/live-status", (req, res) => {
-  res.json(liveData);
-});
+);
 
 
-app.post("/api/register", async (req, res) => {
-  try {
-    const {
+
+app.post(
+  "/api/register",
+  async (req, res) => {
+    try {
+     const {
   name,
   email,
   password,
   role,
   governmentProof,
+  governmentOfficerType,
+  jurisdictionDistrict,
+  jurisdictionArea,
 } = req.body;
 
-    const existingUser = await User.findOne({ email });
+      const allowedRoles = [
+        "citizen",
+        "government",
+      ];
 
-    if (existingUser) {
-      return res.status(400).json({
-        message: "User already exists",
-      });
-    }
+      const allowedOfficerTypes = [
+        "main_officer",
+        "sub_officer",
+      ];
 
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    const user = new User({
-  name,
-  email,
-  password: hashedPassword,
-  role,
-  governmentProof,
-});
-
-    await user.save();
-
-    res.status(201).json({
-      message: "User Registered Successfully",
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: error.message,
-    });
-  }
-});
-
-app.post("/api/login", async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    const user = await User.findOne({ email });
-
-    if (!user) {
-      return res.status(400).json({
-        message: "User not found",
-      });
-    }
-
-    const isMatch = await bcrypt.compare(
-      password,
-      user.password
-    );
-
-    if (!isMatch) {
-      return res.status(400).json({
-        message: "Invalid Password",
-      });
-    }
-
-    const token = jwt.sign(
-      {
-        userId: user._id,
-        email: user.email,
-      },
-      "trafficmind_secret_key",
-      {
-        expiresIn: "7d",
+      if (
+        role &&
+        role !== "citizen" &&
+        role !== "government"
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid registration role",
+        });
       }
-    );
 
-    console.log("LOGIN USER:", user);
+      if (
+        !name ||
+        !email ||
+        !password
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Name, email and password are required",
+        });
+      }
 
-    res.json({
+      const userRole =
+        role || "citizen";
+
+      if (
+        !allowedRoles.includes(
+          userRole
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid registration role",
+        });
+      }
+
+      /*
+       * Government users must choose
+       * Main Officer or Sub Officer.
+       */
+      if (
+        userRole === "government" &&
+        !allowedOfficerTypes.includes(
+          governmentOfficerType
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Government officer type is required",
+        });
+      }
+
+      /*
+       * Citizens must not submit a
+       * government officer type.
+       */
+      if (
+        userRole === "citizen" &&
+        governmentOfficerType
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Government officer type is only for government users",
+        });
+      }
+
+      if (
+        userRole === "government" &&
+        !governmentProof?.trim()
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Government ID is required",
+        });
+      }
+
+      if (
+  userRole === "government" &&
+  !jurisdictionDistrict?.trim()
+) {
+  return res.status(400).json({
+    success: false,
+    message:
+      "District is required for government officers",
+  });
+}
+
+if (
+  userRole === "government" &&
+  governmentOfficerType ===
+    "sub_officer" &&
+  !jurisdictionArea?.trim()
+) {
+  return res.status(400).json({
+    success: false,
+    message:
+      "Assigned area is required for Sub Officers",
+  });
+}
+
+if (
+  userRole === "government" &&
+  governmentOfficerType ===
+    "main_officer" &&
+  jurisdictionArea?.trim()
+) {
+  return res.status(400).json({
+    success: false,
+    message:
+      "Main Officers should not have an assigned area",
+  });
+}
+
+      const existingUser =
+        await User.findOne({
+          email,
+        });
+
+      if (existingUser) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "User already exists",
+        });
+      }
+
+      const hashedPassword =
+        await bcrypt.hash(
+          password,
+          10
+        );
+
+     const user =
+  new User({
+    name:
+      name.trim(),
+
+    email:
+      email.trim().toLowerCase(),
+
+    password:
+      hashedPassword,
+
+    role:
+      userRole,
+
+    governmentProof:
+      userRole === "government"
+        ? governmentProof.trim()
+        : "",
+
+    governmentOfficerType:
+      userRole === "government"
+        ? governmentOfficerType
+        : "",
+
+    jurisdictionDistrict:
+      userRole === "government"
+        ? jurisdictionDistrict.trim()
+        : "",
+
+    jurisdictionArea:
+      userRole === "government" &&
+      governmentOfficerType ===
+        "sub_officer"
+        ? jurisdictionArea.trim()
+        : "",
+
+    verificationStatus:
+      userRole === "government"
+        ? "pending"
+        : "approved",
+  });
+
+      await user.save();
+
+      res.status(201).json({
+  success: true,
+
+  message:
+    userRole === "government"
+      ? "Government officer application submitted. Waiting for admin approval."
+      : "User Registered Successfully",
+
+  verificationStatus:
+    user.verificationStatus,
+
+  governmentOfficerType:
+    user.governmentOfficerType,
+
+  jurisdictionDistrict:
+    user.jurisdictionDistrict,
+
+  jurisdictionArea:
+    user.jurisdictionArea,
+});
+    } catch (error) {
+      console.error(
+        "Registration Error:",
+        error
+      );
+
+      res.status(500).json({
+        success: false,
+        error:
+          error.message,
+      });
+    }
+  }
+);
+
+app.post(
+  "/api/login",
+  async (req, res) => {
+    try {
+      const {
+        email,
+        password,
+      } = req.body;
+
+      if (!email || !password) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Email and password are required",
+        });
+      }
+
+      const user =
+        await User.findOne({ email });
+
+      if (!user) {
+        return res.status(400).json({
+          success: false,
+          message: "User not found",
+        });
+      }
+
+      const isMatch =
+        await bcrypt.compare(
+          password,
+          user.password
+        );
+
+      if (!isMatch) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid email or password",
+        });
+      }
+
+      if (
+  user.role === "government" &&
+  user.verificationStatus !== "approved"
+) {
+  return res.status(200).json({
+    success: true,
+    message:
+      user.verificationStatus ===
+      "rejected"
+        ? "Government officer application was rejected."
+        : "Government officer application is pending admin approval.",
+    role: user.role,
+    verificationStatus:
+      user.verificationStatus,
+    governmentOfficerType:
+      user.governmentOfficerType ||
+      "",
+    accessGranted: false,
+  });
+}
+
+   const token = jwt.sign(
+  {
+    userId: user._id,
+    email: user.email,
+    role: user.role,
+
+    governmentOfficerType:
+      user.governmentOfficerType ||
+      "",
+
+    jurisdictionDistrict:
+      user.jurisdictionDistrict ||
+      "",
+
+    jurisdictionArea:
+      user.jurisdictionArea ||
+      "",
+
+    verificationStatus:
+      user.verificationStatus,
+  },
+  process.env.JWT_SECRET
+);
+      console.log(
+        "LOGIN SUCCESS:",
+        user.email,
+        user.role
+      );
+
+      res.json({
+  success: true,
   message: "Login Successful",
   token,
   role: user.role,
   verificationStatus:
     user.verificationStatus,
-});
-  } catch (error) {
-    res.status(500).json({
-      error: error.message,
-    });
-  }
-});
 
+  governmentOfficerType:
+    user.governmentOfficerType || "",
 
-app.post("/api/predictions", async (req, res) => {
-  try {
-    const prediction = new Prediction(req.body);
+  jurisdictionDistrict:
+    user.jurisdictionDistrict || "",
 
-    await prediction.save();
-
-    res.status(201).json({
-      success: true,
-      message: "Prediction Saved",
-      prediction,
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: error.message,
-    });
-  }
+  jurisdictionArea:
+    user.jurisdictionArea || "",
 });
 
 
+    } catch (error) {
+      console.error(
+        "Login Error:",
+        error.message
+      );
 
-
-app.get("/api/predictions", async (req, res) => {
-  try {
-    const predictions = await Prediction.find()
-      .sort({ createdAt: -1 });
-
-    res.json({
-      success: true,
-      predictions,
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: error.message,
-    });
-  }
-});
-
-
-app.post("/api/ai-predict", async (req, res) => {
-  try {
-    const { vehicles, time, weather } = req.body;
-
-    const options = {
-      args: [
-        vehicles,
-        time,
-        weather,
-      ],
-    };
-
-    PythonShell.run(
-      path.join(__dirname, "ml", "predict.py"),
-      options
-    )
-      .then((results) => {
-        res.json({
-          success: true,
-          risk: results[0],
-        });
-      })
-      .catch((err) => {
-        console.log(err);
-
-        res.status(500).json({
-          success: false,
-          error: err.message,
-        });
+      res.status(500).json({
+        success: false,
+        error: error.message,
       });
-  } catch (error) {
-    res.status(500).json({
-      error: error.message,
-    });
+    }
   }
-});
+);
 
-app.get("/api/map-zones", async (req, res) => {
-  try {
-    const incidents = await Incident.find()
-      .sort({ createdAt: -1 });
 
-    res.json({
-      success: true,
-      incidents,
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: error.message,
-    });
+app.post(
+  "/api/predictions",
+  verifyToken,
+  async (req, res) => {
+    try {
+      const prediction =
+        new Prediction(req.body);
+
+      await prediction.save();
+
+      res.status(201).json({
+        success: true,
+        message: "Prediction Saved",
+        prediction,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
   }
-});
+);
 
-let vehicles = [
-  {
-    id: 1,
-    lat: 12.9716,
-    lng: 77.5946,
-  },
-  {
-    id: 2,
-    lat: 12.9780,
-    lng: 77.6100,
-  },
-];
+app.get(
+  "/api/predictions",
+  verifyToken,
+  async (req, res) => {
+    try {
+      const predictions =
+        await Prediction.find()
+          .sort({ createdAt: -1 });
 
-let ambulance = {
-  id: 1,
-  lat: 12.9820,
-  lng: 77.6200,
-};
+      res.json({
+        success: true,
+        predictions,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  }
+);
+
+
+
+
+app.get(
+  "/api/map-zones",
+  verifyToken,
+  async (req, res) => {
+    try {
+      const incidents =
+        await Incident.find()
+          .sort({ createdAt: -1 });
+
+      res.json({
+        success: true,
+        incidents,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  }
+);
 
 io.on("connection", (socket) => {
   console.log("🟢 User Connected:", socket.id);
@@ -514,45 +923,7 @@ io.on("connection", (socket) => {
 
 const PORT = process.env.PORT || 5000;
 
-setInterval(() => {
 
-  vehicles = vehicles.map(
-    (vehicle) => ({
-      ...vehicle,
-      lat:
-        vehicle.lat +
-        (Math.random() - 0.5) *
-          0.001,
-
-      lng:
-        vehicle.lng +
-        (Math.random() - 0.5) *
-          0.001,
-    })
-  );
-
-  ambulance = {
-    ...ambulance,
-    lat:
-      ambulance.lat +
-      (Math.random() - 0.5) *
-        0.001,
-
-    lng:
-      ambulance.lng +
-      (Math.random() - 0.5) *
-        0.001,
-  };
-
-  io.emit(
-    "digitalTwinUpdate",
-    {
-      vehicles,
-      ambulance,
-    }
-  );
-
-}, 3000);
 
 server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);

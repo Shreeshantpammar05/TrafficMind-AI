@@ -6,8 +6,14 @@ function AdminAnalytics() {
     totalIncidents: 0,
     highSeverity: 0,
     totalPredictions: 0,
-    activeAlerts: 0,
   });
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const API_BASE =
+    import.meta.env.VITE_API_BASE_URL ||
+    "http://localhost:5000";
 
   useEffect(() => {
     fetchAnalytics();
@@ -15,69 +21,204 @@ function AdminAnalytics() {
 
   const fetchAnalytics = async () => {
     try {
-      const incidentsRes = await axios.get(
-        "https://trafficmind-ai.onrender.com/api/incidents"
-      );
+      setLoading(true);
 
-      const predictionsRes = await axios.get(
-        "https://trafficmind-ai.onrender.com/api/predictions"
-      );
+      const token =
+        localStorage.getItem("token");
+
+      const headers = {
+        Authorization:
+          `Bearer ${token}`,
+      };
+
+      const [
+        incidentsRes,
+        predictionsRes,
+      ] = await Promise.all([
+        axios.get(
+          `${API_BASE}/api/incidents`,
+          { headers }
+        ),
+
+        axios.get(
+          `${API_BASE}/api/predictions`,
+          { headers }
+        ),
+      ]);
 
       const incidents =
-        incidentsRes.data.incidents || [];
+        incidentsRes.data?.incidents || [];
 
       const predictions =
-        predictionsRes.data.predictions || [];
+        predictionsRes.data?.predictions || [];
 
-      const highSeverity = incidents.filter(
-        (item) =>
-          item.severity?.toLowerCase() === "high"
-      ).length;
+      const highSeverity =
+        incidents.filter(
+          (item) =>
+            item.severity?.toLowerCase() ===
+            "high"
+        ).length;
 
       setStats({
-        totalIncidents: incidents.length,
+        totalIncidents:
+          incidents.length,
+
         highSeverity,
-        totalPredictions: predictions.length,
-        activeAlerts: highSeverity,
+
+        totalPredictions:
+          predictions.length,
       });
     } catch (error) {
-      console.log(error);
+      console.log(
+        "Admin analytics error:",
+        error
+      );
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <div>
-      <h2>👨‍💼 Admin Analytics</h2>
-
       <div
         style={{
-          display: "grid",
-          gridTemplateColumns:
-            "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: "15px",
-          marginTop: "20px",
+          marginBottom: "20px",
         }}
       >
-        <div className="card">
-          <h3>📍 Total Incidents</h3>
-          <h2>{stats.totalIncidents}</h2>
-        </div>
+        <h2
+          style={{
+            margin: 0,
+            color:
+              "var(--text-primary)",
+          }}
+        >
+          📊 Admin Analytics
+        </h2>
 
-        <div className="card">
-          <h3>🔴 High Severity</h3>
-          <h2>{stats.highSeverity}</h2>
-        </div>
-
-        <div className="card">
-          <h3>🤖 Predictions</h3>
-          <h2>{stats.totalPredictions}</h2>
-        </div>
-
-        <div className="card">
-          <h3>🚨 Active Alerts</h3>
-          <h2>{stats.activeAlerts}</h2>
-        </div>
+        <p
+          style={{
+            color:
+              "var(--text-muted)",
+            marginTop: "6px",
+            marginBottom: 0,
+            lineHeight: "1.5",
+          }}
+        >
+          Overview of current incident and
+          prediction activity.
+        </p>
       </div>
+
+      {loading ? (
+        <div
+          style={{
+            background:
+              "var(--app-surface-2)",
+            padding: "30px",
+            borderRadius: "15px",
+            textAlign: "center",
+            color:
+              "var(--text-muted)",
+            border:
+              "1px dashed var(--border)",
+          }}
+        >
+          Loading analytics...
+        </div>
+      ) : (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns:
+              "repeat(auto-fit,minmax(200px,1fr))",
+            gap: "15px",
+          }}
+        >
+          <div
+            className="card"
+            style={{
+              minHeight: "140px",
+            }}
+          >
+            <span
+              style={{
+                color:
+                  "var(--text-muted)",
+                fontSize: "14px",
+                fontWeight: "700",
+              }}
+            >
+              Total Incidents
+            </span>
+
+            <h2
+              style={{
+                marginTop: "12px",
+                fontSize: "36px",
+              }}
+            >
+              {stats.totalIncidents}
+            </h2>
+          </div>
+
+          <div
+            className="card"
+            style={{
+              minHeight: "140px",
+            }}
+          >
+            <span
+              style={{
+                color:
+                  "var(--text-muted)",
+                fontSize: "14px",
+                fontWeight: "700",
+              }}
+            >
+              High Severity
+            </span>
+
+            <h2
+              style={{
+                marginTop: "12px",
+                fontSize: "36px",
+                color: "#EF4444",
+              }}
+            >
+              {stats.highSeverity}
+            </h2>
+          </div>
+
+          <div
+            className="card"
+            style={{
+              minHeight: "140px",
+            }}
+          >
+            <span
+              style={{
+                color:
+                  "var(--text-muted)",
+                fontSize: "14px",
+                fontWeight: "700",
+              }}
+            >
+              Predictions
+            </span>
+
+            <h2
+              style={{
+                marginTop: "12px",
+                fontSize: "36px",
+                color:
+                  "var(--accent)",
+              }}
+            >
+              {stats.totalPredictions}
+            </h2>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

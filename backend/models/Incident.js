@@ -6,19 +6,35 @@ const incidentSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+
+    latitude: {
+      type: Number,
+    },
+
+    longitude: {
+      type: Number,
+    },
+
     incidentType: {
       type: String,
       required: true,
     },
+
     severity: {
       type: String,
       required: true,
     },
+
     description: {
       type: String,
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+  }
 );
 
-module.exports = mongoose.model("Incident", incidentSchema);
+module.exports = mongoose.model(
+  "Incident",
+  incidentSchema
+);

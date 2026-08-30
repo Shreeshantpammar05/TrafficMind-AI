@@ -1,435 +1,768 @@
-import { FaChevronRight } from "react-icons/fa";
 import {
-  FaFire,
-  FaRoute,
-} from "react-icons/fa";
-import {
+  FaChevronRight,
   FaHome,
-  FaTrafficLight,
-  FaChartLine,
-  FaClipboardList,
   FaRobot,
-  FaAmbulance,
   FaCog,
-  FaPlayCircle,
-  FaVideo,
+  FaExclamationTriangle,
+  FaAmbulance,
+  FaBell,
+  FaUserCircle,
 } from "react-icons/fa";
-import { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
 
-function Sidebar({ sidebarOpen }) {
-  const location = useLocation();
+import {
+  useEffect,
+  useState,
+} from "react";
+
+import {
+  Link,
+  useLocation,
+} from "react-router-dom";
+
+const API_BASE =
+  import.meta.env.VITE_API_BASE_URL ||
+  "http://localhost:5000";
+
+function Sidebar({
+  sidebarOpen,
+}) {
+  const location =
+    useLocation();
 
   const [hovered, setHovered] =
     useState(null);
 
-    const role = localStorage.getItem("role");
+  const [unreadCount, setUnreadCount] =
+    useState(0);
 
- const menuItems = [
-{
-  name: "Command Center",
-  icon: <FaHome />,
-  path: "/dashboard",
-},
+  const role =
+    localStorage.getItem("role") ||
+    "citizen";
 
-{
-  name: "Traffic Operations",
-  icon: <FaTrafficLight />,
-  path: "/traffic-operations",
-},
+  const isOfficer =
+    role === "government" ||
+    role === "admin";
 
-{
-  name: "Emergency Operations",
-  icon: <FaAmbulance />,
-  path: "/emergency-operations",
-},
-];
-if (
-  role === "government" ||
-  role === "admin"
-) {
-  menuItems.push(
+  /*
+   * =========================================================
+   * COMMON MENU
+   * =========================================================
+   *
+   * Citizens can use these pages.
+   */
+  const menuItems = [
     {
-  name: "AI Surveillance",
-  icon: <FaRobot />,
-  path: "/ai-surveillance",
-},
+      name: "Command Center",
+      icon: <FaHome />,
+      path: "/dashboard",
+    },
 
-{
-  name: "Administration",
-  icon: <FaCog />,
-  path: "/admin",
-},
+    {
+      name: "Incident Management",
+      icon:
+        <FaExclamationTriangle />,
+      path: "/incidents",
+    },
+  ];
 
-{
-  name: "Demo Control",
-  icon: <FaPlayCircle />,
-  path: "/demo-control",
-},
-  );
-}
+  /*
+   * =========================================================
+   * GOVERNMENT + ADMIN MENU
+   * =========================================================
+   *
+   * Emergency Response must NOT appear for citizens.
+   */
+  if (isOfficer) {
+    menuItems.push(
+      {
+        name: "AI Vision",
+        icon: <FaRobot />,
+        path: "/ai-vision",
+      },
+      {
+        name: "Emergency Response",
+        icon: <FaAmbulance />,
+        path: "/emergency-response",
+      }
+    );
+  }
 
-  return (
-   <div
- 
-  style={{
-  width: sidebarOpen ? "220px" : "0px",
-  transition: "all .3s ease",
-  overflow: "hidden",
-    height: "100vh",
-overflowY: "auto",
+  /*
+   * =========================================================
+   * ADMIN ONLY
+   * =========================================================
+   */
+  if (role === "admin") {
+    menuItems.push({
+      name: "Administration",
+      icon: <FaCog />,
+      path: "/admin",
+    });
+  }
 
-  position: "fixed",
-top: "0",
-left: "0",
-bottom: "0",
-overflowY: "auto",
+  /*
+   * =========================================================
+   * UNREAD OFFICER ALERTS
+   * =========================================================
+   */
+  const fetchUnreadAlerts =
+    async () => {
+      try {
+        const token =
+          localStorage.getItem(
+            "token"
+          );
 
+        if (!token) {
+          setUnreadCount(0);
+          return;
+        }
 
-    background:
-  "linear-gradient(180deg,#0f172a 0%,#020617 100%)",
-    color: "white",
-    padding: sidebarOpen ? "25px" : "0px",
-    borderRight: sidebarOpen
-  ? "1px solid rgba(255,255,255,0.08)"
-  : "none",
-   boxShadow: sidebarOpen
-  ? "5px 0 20px rgba(0,0,0,0.2)"
-  : "none",
-  }}
->
-    <div
-  style={{
-    display: "flex",
-    alignItems: "center",
-    gap: "14px",
-    padding: "14px",
-    marginBottom: "30px",
-    borderRadius: "16px",
-    background: "rgba(255,255,255,0.04)",
-    border: "1px solid rgba(255,255,255,0.08)",
-    backdropFilter: "blur(10px)",
-  }}
->
-  <div
-    style={{
-      width: "55px",
-      height: "55px",
-      borderRadius: "14px",
-      background: "linear-gradient(135deg, #2563EB, #38BDF8)",
-      display: "flex",
-      justifyContent: "center",
-      alignItems: "center",
-      fontSize: "26px",
-      boxShadow: "0 0 18px rgba(59,130,246,0.5)",
-    }}
-  >
-    🚦
-  </div>
+        let count = 0;
 
-  <div>
-    <h2
-      style={{
-        margin: 0,
-        fontSize: "22px",
-        fontWeight: "800",
-        color: "#FFFFFF",
-      }}
-    >
-      TrafficMind AI
-    </h2>
+        /*
+         * Officer alerts are only relevant
+         * to government/admin users.
+         */
+        if (isOfficer) {
+          try {
+            const officerResponse =
+              await fetch(
+                `${API_BASE}/api/officer-alerts/my`,
+                {
+                  headers: {
+                    Authorization:
+                      `Bearer ${token}`,
+                  },
+                }
+              );
 
-    <p
-      style={{
-        margin: "4px 0 0",
-        fontSize: "13px",
-        color: "#94A3B8",
-        fontWeight: "500",
-      }}
-    >
-      Smart City Command Center
-    </p>
-  </div>
-</div>
+            if (
+              officerResponse.ok
+            ) {
+              const officerData =
+                await officerResponse.json();
 
-<div
-  style={{
-    height: "1px",
-    background: "rgba(255,255,255,0.08)",
-    marginBottom: "20px",
-  }}
-/>
+              const officerAlerts =
+                Array.isArray(
+                  officerData.alerts
+                )
+                  ? officerData.alerts
+                  : [];
 
-<div
-  style={{
-    background: "#111827",
-    padding: "15px",
-    borderRadius: "12px",
-    marginBottom: "20px",
-    border: "1px solid rgba(59,130,246,0.25)",
-  }}
->
-  <div
-    style={{
-      fontWeight: "700",
-      marginBottom: "8px",
-    }}
-  >
-    <div
-  style={{
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-  }}
->
-  <span
-    style={{
-      width: "10px",
-      height: "10px",
-      background: "#22c55e",
-      borderRadius: "50%",
-      boxShadow:
-        "0 0 12px #22c55e",
-    }}
-  />
+              count +=
+                officerAlerts.filter(
+                  (alert) =>
+                    !alert.isRead
+                ).length;
+            }
+          } catch (
+            officerError
+          ) {
+            console.log(
+              officerError
+            );
+          }
+        }
 
-  System Status
-</div>
-  </div>
+        setUnreadCount(
+          Math.min(
+            count,
+            99
+          )
+        );
+      } catch (error) {
+        console.log(
+          "Sidebar alert count error:",
+          error
+        );
+      }
+    };
 
-  <div
-    style={{
-      color: "#94a3b8",
-      fontSize: "13px",
-    }}
-  >
-    AI Monitoring Active
-  </div>
+  useEffect(() => {
+    fetchUnreadAlerts();
 
-  <div
-    style={{
-      color: "#22c55e",
-      fontSize: "12px",
-      marginTop: "6px",
-      fontWeight: "600",
-    }}
-  >
-    All Systems Operational
-  </div>
-</div>
+    const interval =
+      setInterval(
+        fetchUnreadAlerts,
+        15000
+      );
 
-      {menuItems.map((item, index) => (
+    return () =>
+      clearInterval(
+        interval
+      );
+  }, [
+    role,
+    isOfficer,
+  ]);
+
+  const renderMenuItem =
+    (
+      item,
+      index
+    ) => {
+      const isActive =
+        location.pathname ===
+        item.path;
+
+      const isHovered =
+        hovered === index;
+
+      const itemTextColor =
+        isActive
+          ? "#FFFFFF"
+          : "var(--text-primary)";
+
+      return (
         <Link
-          key={index}
+          key={item.path}
           to={item.path}
           style={{
-            textDecoration: "none",
-            color: "white",
+            textDecoration:
+              "none",
+            color:
+              itemTextColor,
+            display:
+              "block",
           }}
         >
-         <div
-  onMouseEnter={() =>
-    setHovered(index)
-  }
-  onMouseLeave={() =>
-    setHovered(null)
-  }
-  style={{
-              padding: "14px 18px",
-             fontWeight: "800",
-              transition: "all 0.3s ease",
-              marginBottom: "10px",
-              borderRadius: "12px",
-              cursor: "pointer",
+          <div
+            onMouseEnter={() =>
+              setHovered(index)
+            }
+            onMouseLeave={() =>
+              setHovered(null)
+            }
+            style={{
+              padding:
+                "14px 18px",
+
+              fontWeight:
+                "700",
+
+              marginBottom:
+                "10px",
+
+              borderRadius:
+                "12px",
+
+              cursor:
+                "pointer",
 
               border:
-  location.pathname === item.path
-    ? "1px solid rgba(59,130,246,0.4)"
-    : "1px solid transparent",
+                isActive
+                  ? "1px solid rgba(59,130,246,.35)"
+                  : "1px solid transparent",
 
               background:
-                location.pathname ===
-                item.path
-                  ? "linear-gradient(135deg,#2563eb,#3b82f6)"
+                isActive
+                  ? "linear-gradient(135deg,var(--accent-strong),var(--accent))"
+                  : isHovered
+                  ? "var(--accent-soft)"
                   : "transparent",
 
               boxShadow:
-                location.pathname ===
-                item.path
-                  ?  "0 0 20px rgba(59,130,246,0.4)"
+                isActive
+                  ? "0 0 20px rgba(59,130,246,.18)"
                   : "none",
 
-              transition: "all 0.3s ease",
-
               borderLeft:
-  hovered === index
-    ? "4px solid #3b82f6"
-    : "4px solid transparent",
+                isHovered
+                  ? "4px solid var(--accent)"
+                  : "4px solid transparent",
 
-transform:
-  hovered === index
-    ? "translateX(4px)"
-    : location.pathname === item.path
-    ? "translateX(5px)"
-    : "translateX(0)",
+              transform:
+                isHovered
+                  ? "translateX(4px)"
+                  : isActive
+                  ? "translateX(2px)"
+                  : "translateX(0)",
+
+              transition:
+                "all .3s ease",
+
+              boxSizing:
+                "border-box",
             }}
           >
-            <>
-  <div
-  style={{
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-  }}
->
-  <div
-    style={{
-      display: "flex",
-      alignItems: "center",
-      gap: "12px",
-    }}
-  >
-    <div
-      style={{
-        fontSize: "18px",
-        color:
-          location.pathname === item.path
-            ? "#ffffff"
-            : "#60a5fa",
-      }}
-    >
-      {item.icon}
-    </div>
+            <div
+              style={{
+                display:
+                  "flex",
 
-    <span>{item.name}</span>
-  </div>
+                alignItems:
+                  "center",
 
-  <FaChevronRight
-    style={{
-      fontSize: "12px",
-      color: "#94A3B8",
-      opacity:
-        hovered === index ||
-        location.pathname === item.path
-          ? 1
-          : 0,
-      transform:
-        hovered === index
-          ? "translateX(4px)"
-          : "translateX(0)",
-      transition: "all .3s ease",
-    }}
-  />
-</div>
+                justifyContent:
+                  "space-between",
 
-  {hovered === index && (
-    <div
-      style={{
-        marginTop: "8px",
-        fontSize: "12px",
-        color: "#cbd5e1",
-        fontWeight: "500",
-      }}
-    >
-      {item.path === "/dashboard" &&
-        "System Overview"}
+                gap:
+                  "10px",
+              }}
+            >
+              <div
+                style={{
+                  display:
+                    "flex",
 
-      {item.path === "/ai-vision" &&
-        "AI Status: Online"}
+                  alignItems:
+                    "center",
 
-      {item.path === "/traffic-control" &&
-        "Signals Optimized"}
+                  gap:
+                    "12px",
 
-      {item.path === "/emergency-center" &&
-        "Emergency Ready"}
+                  minWidth:
+                    0,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize:
+                      "18px",
 
-      {item.path ===
-        "/traffic-intelligence-center" &&
-        "Analytics Active"}
+                    color:
+                      isActive
+                        ? "#FFFFFF"
+                        : "var(--accent)",
 
-      {item.path === "/incidents" &&
-        "Incident Tracking"}
+                    display:
+                      "flex",
 
-      {item.path === "/admin" &&
-        "System Healthy"}
+                    alignItems:
+                      "center",
 
-      {item.path === "/demo-control" &&
-        "Presentation Ready"}
-    </div>
-  )}
-</>
+                    flexShrink:
+                      0,
+                  }}
+                >
+                  {item.icon}
+                </div>
+
+                <span
+                  style={{
+                    color:
+                      itemTextColor,
+
+                    lineHeight:
+                      "1.3",
+
+                    overflowWrap:
+                      "anywhere",
+                  }}
+                >
+                  {item.name}
+                </span>
+
+                {item.path ===
+                  "/alerts" &&
+                  unreadCount >
+                    0 && (
+                    <span
+                      style={{
+                        minWidth:
+                          "22px",
+
+                        height:
+                          "22px",
+
+                        padding:
+                          "0 6px",
+
+                        display:
+                          "inline-flex",
+
+                        alignItems:
+                          "center",
+
+                        justifyContent:
+                          "center",
+
+                        borderRadius:
+                          "999px",
+
+                        background:
+                          isActive
+                            ? "#fff"
+                            : "#ef4444",
+
+                        color:
+                          isActive
+                            ? "var(--accent)"
+                            : "#fff",
+
+                        fontSize:
+                          "11px",
+
+                        fontWeight:
+                          "800",
+
+                        flexShrink:
+                          0,
+                      }}
+                    >
+                      {unreadCount >
+                      99
+                        ? "99+"
+                        : unreadCount}
+                    </span>
+                  )}
+              </div>
+
+              <FaChevronRight
+                style={{
+                  fontSize:
+                    "12px",
+
+                  color:
+                    isActive
+                      ? "rgba(255,255,255,.82)"
+                      : "var(--text-muted)",
+
+                  opacity:
+                    isHovered ||
+                    isActive
+                      ? 1
+                      : 0,
+
+                  transform:
+                    isHovered
+                      ? "translateX(4px)"
+                      : "translateX(0)",
+
+                  transition:
+                    "all .3s ease",
+
+                  flexShrink:
+                    0,
+                }}
+              />
+            </div>
           </div>
         </Link>
-      ))}
+      );
+    };
 
-      <div
-  style={{
-    marginTop: "30px",
-    paddingTop: "20px",
-    borderTop: "1px solid rgba(255,255,255,0.08)",
-  }}
->
-  <div
-    style={{
-      display: "flex",
-      alignItems: "center",
-      gap: "10px",
-      marginBottom: "12px",
-    }}
-  >
-    <div
-      style={{
-        width: "10px",
-        height: "10px",
-        borderRadius: "50%",
-        background: "#22c55e",
-        boxShadow: "0 0 10px #22c55e",
-      }}
-    />
+  /*
+   * Use large indexes for the fixed bottom
+   * items so hover state doesn't conflict
+   * with the main navigation.
+   */
+  const profileIndex =
+    1000;
 
-    <span
+  const alertsIndex =
+    1001;
+
+  return (
+    <aside
       style={{
-        color: "#22c55e",
-        fontWeight: "600",
-        fontSize: "14px",
+        width:
+          sidebarOpen
+            ? "260px"
+            : "0px",
+
+        transition:
+          "all .3s ease",
+
+        overflow:
+          "hidden",
+
+        height:
+          "100vh",
+
+        overflowY:
+          "auto",
+
+        position:
+          "fixed",
+
+        top: 0,
+
+        left: 0,
+
+        bottom: 0,
+
+        background:
+          "var(--app-surface)",
+
+        color:
+          "var(--text-primary)",
+
+        padding:
+          sidebarOpen
+            ? "25px"
+            : "0px",
+
+        borderRight:
+          sidebarOpen
+            ? "1px solid var(--border)"
+            : "none",
+
+        boxShadow:
+          sidebarOpen
+            ? "5px 0 20px rgba(0,0,0,.08)"
+            : "none",
+
+        boxSizing:
+          "border-box",
+
+        zIndex:
+          1100,
+
+        isolation:
+          "isolate",
       }}
     >
-      System Online
-    </span>
-  </div>
+      {/* =================================================
+          BRAND
+          ================================================= */}
 
-  <p
-    style={{
-      margin: "6px 0",
-      color: "#94a3b8",
-      fontSize: "13px",
-    }}
-  >
-    Role : {role}
-  </p>
+      <div
+        style={{
+          display:
+            "flex",
 
-  <p
-    style={{
-      margin: "6px 0",
-      color: "#94a3b8",
-      fontSize: "13px",
-    }}
-  >
-    Version : v2.0
-  </p>
+          alignItems:
+            "center",
 
-  <p
-    style={{
-      marginTop: "15px",
-      color: "#64748b",
-      fontSize: "12px",
-      textAlign: "center",
-    }}
-  >
-    TrafficMind AI © 2026
-  </p>
-</div>
-    </div>
+          gap:
+            "14px",
+
+          padding:
+            "14px",
+
+          marginBottom:
+            "30px",
+
+          borderRadius:
+            "16px",
+
+          background:
+            "var(--glass)",
+
+          border:
+            "1px solid var(--border)",
+
+          backdropFilter:
+            "blur(10px)",
+
+          boxSizing:
+            "border-box",
+        }}
+      >
+        <div
+          style={{
+            width:
+              "12px",
+
+            height:
+              "12px",
+
+            borderRadius:
+              "50%",
+
+            background:
+              "var(--accent)",
+
+            boxShadow:
+              "0 0 14px rgba(59,130,246,.55)",
+
+            flexShrink:
+              0,
+          }}
+        />
+
+        <div>
+          <h2
+            style={{
+              margin:
+                0,
+
+              fontSize:
+                "22px",
+
+              lineHeight:
+                "1.1",
+
+              fontWeight:
+                "800",
+
+              color:
+                "var(--text-primary)",
+            }}
+          >
+            TrafficMind AI
+          </h2>
+
+          <p
+            style={{
+              margin:
+                "6px 0 0",
+
+              fontSize:
+                "13px",
+
+              lineHeight:
+                "1.45",
+
+              color:
+                "var(--text-muted)",
+
+              fontWeight:
+                "500",
+            }}
+          >
+            Smart City Command Center
+          </p>
+        </div>
+      </div>
+
+      {/* Divider */}
+
+      <div
+        style={{
+          height:
+            "1px",
+
+          background:
+            "var(--border)",
+
+          marginBottom:
+            "20px",
+        }}
+      />
+
+      {/* =================================================
+          MAIN NAVIGATION
+          ================================================= */}
+
+      {menuItems.map(
+        (
+          item,
+          index
+        ) =>
+          renderMenuItem(
+            item,
+            index
+          )
+      )}
+
+      {/* =================================================
+          PROFILE
+          EVERY AUTHENTICATED USER
+          ================================================= */}
+
+      <div
+        style={{
+          marginTop:
+            "8px",
+        }}
+      >
+        {renderMenuItem(
+          {
+            name:
+              "My Profile",
+
+            icon:
+              <FaUserCircle />,
+
+            path:
+              "/profile",
+          },
+          profileIndex
+        )}
+      </div>
+
+      {/* =================================================
+          ALERTS
+          ================================================= */}
+
+      <div
+        style={{
+          marginTop:
+            "12px",
+
+          paddingTop:
+            "18px",
+
+          borderTop:
+            "1px solid var(--border)",
+        }}
+      >
+        {renderMenuItem(
+          {
+            name:
+              "Alerts",
+
+            icon:
+              <FaBell />,
+
+            path:
+              "/alerts",
+          },
+          alertsIndex
+        )}
+      </div>
+
+      {/* =================================================
+          FOOTER
+          ================================================= */}
+
+      <div
+        style={{
+          marginTop:
+            "10px",
+
+          paddingTop:
+            "20px",
+
+          borderTop:
+            "1px solid var(--border)",
+        }}
+      >
+        <p
+          style={{
+            margin:
+              "6px 0",
+
+            color:
+              "var(--text-muted)",
+
+            fontSize:
+              "13px",
+          }}
+        >
+          Role:{" "}
+          <strong
+            style={{
+              color:
+                "var(--text-secondary)",
+            }}
+          >
+            {role}
+          </strong>
+        </p>
+
+        <p
+          style={{
+            marginTop:
+              "15px",
+
+            color:
+              "var(--text-subtle)",
+
+            fontSize:
+              "12px",
+
+            textAlign:
+              "center",
+          }}
+        >
+          TrafficMind AI © 2026
+        </p>
+      </div>
+    </aside>
   );
 }
 

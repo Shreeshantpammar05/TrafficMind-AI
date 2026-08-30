@@ -2,146 +2,135 @@ import MainLayout from "../layouts/MainLayout";
 import IncidentForm from "../components/IncidentForm";
 import IncidentList from "../components/IncidentList";
 
-
 function IncidentManagement() {
   return (
     <MainLayout>
-
-      <div className="hero-header">
-
-  <div>
-
-    <h1>
-      📋 Incident Management Center
-    </h1>
-
-    <p
-      style={{
-        color: "#94a3b8",
-        fontSize: "18px",
-        fontWeight: "600",
-      }}
-    >
-      Incident Operations Hub
-    </p>
-
-    <p
-      style={{
-        color: "#cbd5e1",
-      }}
-    >
-      Create, monitor, track and
-      manage traffic incidents
-      across the city in real-time.
-    </p>
-
-  </div>
-
-  <div
-    style={{
-      background: "#f59e0b",
-      padding: "10px 18px",
-      borderRadius: "25px",
-      fontWeight: "bold",
-    }}
-  >
-    📋 Incident Tracking Active
-  </div>
-
-</div>
-
-<div className="cards">
-
-  <div className="card">
-
-    <h3>
-      📋 Total Incidents
-    </h3>
-
-    <h2>
-      LIVE
-    </h2>
-
-  </div>
-
-  <div className="card">
-
-    <h3>
-      🚨 Monitoring
-    </h3>
-
-    <h2>
-      ACTIVE
-    </h2>
-
-  </div>
-
-  <div className="card">
-
-    <h3>
-      🚦 Traffic Alerts
-    </h3>
-
-    <h2>
-      ONLINE
-    </h2>
-
-  </div>
-
-  <div className="card">
-
-    <h3>
-      🤖 AI Support
-    </h3>
-
-    <h2
-      style={{
-        color: "#22c55e",
-      }}
-    >
-      ACTIVE
-    </h2>
-
-  </div>
-
-</div>
       <div
-  className="section-card"
-  style={{
-    marginTop: "20px",
-    marginBottom: "20px",
-  }}
->
-  <h2>
-    🚨 Incident Creation & Tracking
-  </h2>
-
-  <p>
-    Create incidents and monitor
-    real-time traffic events.
-  </p>
-</div>
-
-<div className="dashboard-grid">
-        <div className="section-card">
-          <IncidentForm />
-        </div>
+        style={{
+          width: "100%",
+          color: "var(--text-primary)",
+        }}
+      >
+        {/* PAGE HEADER */}
 
         <div
-  className="section-card"
-  style={{
-    height: "650px",
-  }}
->
-  <IncidentList />
-</div>
+          className="hero-header"
+          style={{
+            marginBottom: "25px",
+            gap: "18px",
+            flexWrap: "wrap",
+          }}
+        >
+          <div
+            style={{
+              minWidth: 0,
+              flex: "1 1 520px",
+            }}
+          >
+            <h1
+              style={{
+                margin: 0,
+                lineHeight: 1.1,
+              }}
+            >
+             Incident Management Center
+            </h1>
+
+
+            <p
+              style={{
+                color: "rgba(255,255,255,.84)",
+                maxWidth: "700px",
+                lineHeight: "1.6",
+                marginTop: "8px",
+                marginBottom: 0,
+                fontSize: "14px",
+              }}
+            >
+              Create, monitor, track, and manage
+              traffic incidents across the city
+              using the existing incident
+              management system.
+            </p>
+          </div>
+
+         
+        </div>
+
+        {/* INCIDENT MANAGEMENT WORKSPACE */}
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns:
+              "minmax(320px,0.9fr) minmax(420px,1.1fr)",
+            gap: "25px",
+            alignItems: "stretch",
+          }}
+        >
+          {/* REPORT INCIDENT */}
+
+          <div
+            className="section-card"
+            style={{
+              minWidth: 0,
+              padding: "24px",
+            }}
+          >
+            
+
+            <IncidentForm />
+          </div>
+
+          {/* INCIDENT LIST */}
+
+          <div
+            className="section-card"
+            style={{
+              minWidth: 0,
+              minHeight: "650px",
+              padding: "24px",
+            }}
+          >
+            <div
+              style={{
+                marginBottom: "20px",
+                paddingBottom: "4px",
+              }}
+            >
+              <h2
+                style={{
+                  margin: 0,
+                  lineHeight: 1.2,
+                }}
+              >
+                📋 Recent Incidents
+              </h2>
+
+              <p
+                style={{
+                  color: "var(--text-muted)",
+                  marginTop: "7px",
+                  lineHeight: "1.55",
+                  marginBottom: 0,
+                  fontSize: "14px",
+                }}
+              >
+                Monitor reported incidents and
+                real-time updates from the
+                incident system.
+              </p>
+            </div>
+
+            <IncidentList />
+          </div>
+        </div>
+
+        
+
+        
       </div>
-
-     
-
-      
     </MainLayout>
-
   );
 }
 

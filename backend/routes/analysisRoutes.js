@@ -1,10 +1,16 @@
+const {
+  verifyToken,
+} = require("../middleware/authMiddleware");
 const express = require("express");
 const router = express.Router();
 
 const AIAnalysis =
   require("../models/AIAnalysis");
 
-router.post("/", async (req, res) => {
+router.post(
+  "/",
+  verifyToken,
+  async (req, res) => {
   try {
     const analysis =
       new AIAnalysis(req.body);
@@ -22,7 +28,10 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.get("/", async (req, res) => {
+router.get(
+  "/",
+  verifyToken,
+  async (req, res) => {
   try {
     const analyses =
       await AIAnalysis.find()

@@ -2,41 +2,40 @@ import axios from "axios";
 import { useState } from "react";
 
 function RouteRecommendation() {
-  const API_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImUyNzBlNDU4YjU4MTQwMWJhNmRkZTFjZmUxODgwMjJmIiwiaCI6Im11cm11cjY0In0=";
-
   const [start, setStart] = useState("");
   const [destination, setDestination] = useState("");
   const [result, setResult] = useState("");
 
   const getCoordinates = async (place) => {
     const res = await axios.get(
-      "https://api.openrouteservice.org/geocode/search",
+      "http://localhost:5000/api/routes/geocode",
       {
         params: {
-          api_key: API_KEY,
           text: `${place}, Bangalore, Karnataka, India`,
-          size: 1,
         },
       }
     );
 
-    if (!res.data.features.length) {
+    if (
+      !res.data.features ||
+      res.data.features.length === 0
+    ) {
       throw new Error("Location not found");
     }
 
-    const coords =
-      res.data.features[0].geometry.coordinates;
-
-    console.log(
-      `${place} Coordinates:`,
-      coords
-    );
-
-    return coords;
+    return res.data.features[0]
+      .geometry.coordinates;
   };
 
   const findRoute = async () => {
     try {
+      if (!start || !destination) {
+        setResult(
+          "Please enter both start and destination."
+        );
+        return;
+      }
+
       setResult("Generating Route...");
 
       const startCoords =
@@ -45,39 +44,27 @@ function RouteRecommendation() {
       const endCoords =
         await getCoordinates(destination);
 
-      console.log("START:", startCoords);
-      console.log("END:", endCoords);
-
       const routeRes = await axios.post(
-        "https://api.openrouteservice.org/v2/directions/driving-car/json",
+        "http://localhost:5000/api/routes/directions",
         {
-          coordinates: [
-            startCoords,
-            endCoords,
-          ],
-        },
-        {
-          headers: {
-            Authorization: API_KEY,
-            Accept: "application/json",
-            "Content-Type":
-              "application/json",
-          },
+          start: startCoords,
+          end: endCoords,
         }
       );
 
-      const summary =
-        routeRes.data.routes[0].summary;
+      const route = routeRes.data.route;
+
+      if (!route) {
+        throw new Error("Route not found");
+      }
+
+      const summary = route.summary;
 
       const distance =
-        (
-          summary.distance / 1000
-        ).toFixed(2);
+        (summary.distance / 1000).toFixed(2);
 
       const duration =
-        (
-          summary.duration / 60
-        ).toFixed(0);
+        (summary.duration / 60).toFixed(0);
 
       let trafficStatus = "Low";
 
@@ -88,36 +75,26 @@ function RouteRecommendation() {
       }
 
       setResult(`
-🛣️ Route Generated Successfully
+Route Generated Successfully
 
-📍 From: ${start}
+From: ${start}
 
-📍 To: ${destination}
+To: ${destination}
 
-📏 Distance: ${distance} km
+Distance: ${distance} km
 
-⏱️ Estimated Time: ${duration} mins
+Estimated Time: ${duration} mins
 
-🚦 Traffic Status: ${trafficStatus}
+Traffic Status: ${trafficStatus}
 `);
     } catch (error) {
       console.log(
-        "FULL ERROR:",
-        error
+        "Route Error:",
+        error.response?.data || error.message
       );
 
-      if (error.response) {
-        console.log(
-          JSON.stringify(
-            error.response.data,
-            null,
-            2
-          )
-        );
-      }
-
       setResult(`
-❌ Route Generation Failed
+Route Generation Failed
 
 Try locations like:
 
@@ -135,7 +112,7 @@ Airport
   return (
     <div>
       <h2>
-        🛣️ Smart Route Intelligence
+        Smart Route Intelligence
       </h2>
 
       <input
@@ -155,18 +132,14 @@ Airport
         placeholder="Destination"
         value={destination}
         onChange={(e) =>
-          setDestination(
-            e.target.value
-          )
+          setDestination(e.target.value)
         }
       />
 
       <br />
       <br />
 
-      <button
-        onClick={findRoute}
-      >
+      <button onClick={findRoute}>
         Generate Route
       </button>
 

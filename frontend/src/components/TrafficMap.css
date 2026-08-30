@@ -1,0 +1,131 @@
+.traffic-map-shell {
+
+  color: var(--text-primary);
+
+}
+
+.traffic-map-title {
+
+  margin: 0;
+
+  color: var(--text-primary);
+
+  font-size: 22px;
+
+  font-weight: 800;
+
+}
+
+.traffic-map-subtitle {
+
+  color: var(--text-muted);
+
+  margin: 5px 0 0;
+
+  line-height: 1.45;
+
+}
+
+.traffic-map-shell .leaflet-container {
+
+  background: var(--app-surface-3);
+
+  border: 1px solid var(--border);
+
+  border-radius: 16px;
+
+  box-shadow: var(--shadow);
+
+}
+
+.traffic-map-shell .leaflet-control-zoom a,
+
+.traffic-map-shell .leaflet-bar a {
+
+  background: var(--app-surface) !important;
+
+  color: var(--text-primary) !important;
+
+  border-color: var(--border) !important;
+
+}
+
+.traffic-map-shell .leaflet-control-zoom a:hover,
+
+.traffic-map-shell .leaflet-bar a:hover {
+
+  background: var(--app-surface-2) !important;
+
+}
+
+.traffic-map-shell .leaflet-control-attribution {
+
+  background: rgba(255,255,255,.82) !important;
+
+  color: var(--text-muted) !important;
+
+}
+
+:root[data-theme="dark"] .traffic-map-shell .leaflet-control-attribution {
+
+  background: rgba(0,0,0,.72) !important;
+
+  color: var(--text-secondary) !important;
+
+}
+
+.traffic-map-shell .leaflet-popup-content-wrapper,
+
+.traffic-map-shell .leaflet-popup-tip {
+
+  background: var(--app-surface);
+
+  color: var(--text-primary);
+
+  border: 1px solid var(--border);
+
+}
+
+.traffic-map-shell .leaflet-popup-content {
+
+  color: var(--text-primary);
+
+}
+
+.traffic-map-shell .leaflet-popup-content strong {
+
+  color: var(--text-primary);
+
+}
+
+.traffic-map-shell .leaflet-tooltip {
+
+  background: var(--app-surface);
+
+  color: var(--text-primary);
+
+  border: 1px solid var(--border);
+
+}
+
+@media (max-width: 760px) {
+
+  .traffic-map-canvas {
+
+    height: 55vh !important;
+
+    min-height: 360px;
+
+  }
+
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .traffic-map-shell .leaflet-container {
+
+    scroll-behavior: auto;
+
+  }
+
+}

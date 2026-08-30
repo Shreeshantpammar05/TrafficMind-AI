@@ -4,14 +4,12 @@ function GovernmentRoute({ children }) {
   const role = localStorage.getItem("role");
 
   const verificationStatus =
-    localStorage.getItem(
-      "verificationStatus"
-    );
+    localStorage.getItem("verificationStatus");
 
   if (
-  (role !== "government" && role !== "admin") ||
-  verificationStatus !== "approved"
-) {
+    role !== "admin" &&
+    (role !== "government" || verificationStatus !== "approved")
+  ) {
     return <Navigate to="/dashboard" />;
   }
 

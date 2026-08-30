@@ -5,10 +5,19 @@ const path = require("path");
 
 const router = express.Router();
 
-const uploadDir = path.join(__dirname, "../uploads");
+const {
+  verifyToken,
+} = require("../middleware/authMiddleware");
+
+const uploadDir = path.join(
+  __dirname,
+  "../uploads"
+);
 
 if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+  fs.mkdirSync(uploadDir, {
+    recursive: true,
+  });
 }
 
 const storage = multer.diskStorage({
@@ -17,7 +26,10 @@ const storage = multer.diskStorage({
   },
 
   filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
+    cb(
+      null,
+      `${Date.now()}-${file.originalname}`
+    );
   },
 });
 
@@ -33,7 +45,11 @@ const fileFilter = (req, file, cb) => {
   if (allowed.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error("Only image files are allowed."));
+    cb(
+      new Error(
+        "Only image files are allowed."
+      )
+    );
   }
 };
 
@@ -42,31 +58,38 @@ const upload = multer({
   fileFilter,
 });
 
-router.post("/image", upload.single("image"), (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({
+router.post(
+  "/image",
+  verifyToken,
+  upload.single("image"),
+  (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: "No image uploaded",
+        });
+      }
+
+      console.log(
+        "========== FILE UPLOADED =========="
+      );
+      console.log(req.file);
+
+      res.json({
+        success: true,
+        imageName: req.file.filename,
+        imagePath: req.file.path,
+      });
+    } catch (err) {
+      console.error(err);
+
+      res.status(500).json({
         success: false,
-        message: "No image uploaded",
+        message: err.message,
       });
     }
-
-    console.log("========== FILE UPLOADED ==========");
-    console.log(req.file);
-
-    res.json({
-      success: true,
-      imageName: req.file.filename,
-      imagePath: req.file.path,
-    });
-  } catch (err) {
-    console.error(err);
-
-    res.status(500).json({
-      success: false,
-      message: err.message,
-    });
   }
-});
+);
 
 module.exports = router;

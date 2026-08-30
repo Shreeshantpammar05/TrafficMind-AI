@@ -1,17 +1,24 @@
 const express = require("express");
+
 const router = express.Router();
 
 const latestDetection =
   require("../data/latestDetection");
 
-router.get("/latest", (req, res) => {
+const {
+  verifyToken,
+} = require("../middleware/authMiddleware");
 
-  res.json(
-    latestDetection.latestAlert || {
-      title: "No Active Alerts"
-    }
-  );
-
-});
+router.get(
+  "/latest",
+  verifyToken,
+  (req, res) => {
+    res.json(
+      latestDetection.latestAlert || {
+        title: "No Active Alerts",
+      }
+    );
+  }
+);
 
 module.exports = router;

@@ -5,17 +5,19 @@ const latestDetection =
   require("../data/latestDetection");
 
 router.get("/status", (req, res) => {
+  const accidentDetected =
+    latestDetection.accidentDetected;
 
   res.json({
-    incidentDetected:
-      latestDetection.incidentDetected,
+    accidentDetected,
 
-    alert:
-      latestDetection.incidentDetected
-        ? "POSSIBLE TRAFFIC INCIDENT DETECTED"
-        : "NO INCIDENT DETECTED"
+    accidentSeverity:
+      latestDetection.accidentSeverity,
+
+    alert: accidentDetected
+      ? "ACCIDENT DETECTED"
+      : "NO ACCIDENT"
   });
-
 });
 
 module.exports = router;

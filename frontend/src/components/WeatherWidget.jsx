@@ -1,48 +1,160 @@
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useState,
+} from "react";
+
 import axios from "axios";
 
-function WeatherWidget() {
-  const [weather, setWeather] = useState(null);
+const API_BASE =
+  import.meta.env.VITE_API_BASE_URL ||
+  "http://localhost:5000";
+
+function WeatherWidget({
+  location,
+}) {
+  const [
+    weather,
+    setWeather,
+  ] = useState(null);
+
+  const [
+    loading,
+    setLoading,
+  ] = useState(false);
+
+  const [
+    error,
+    setError,
+  ] = useState("");
+
 
   useEffect(() => {
-    fetchWeather();
-  }, []);
+    if (!location) {
+      return;
+    }
 
-  const fetchWeather = async () => {
-    try {
-      const apiKey = "4fc4d799adf706c1c243098827e6e5ce";
+    fetchWeather(
+      location.latitude,
+      location.longitude
+    );
+  }, [
+    location,
+  ]);
 
-      const res = await axios.get(
-  `https://api.openweathermap.org/data/2.5/weather?q=Bengaluru&appid=${apiKey}&units=metric`
-);
 
-console.log(res.data);
+  const fetchWeather =
+    async (
+      latitude,
+      longitude
+    ) => {
+      try {
+        setLoading(
+          true
+        );
 
-      setWeather(res.data);
-    } catch (error) {
-  alert(
-    JSON.stringify(error.response?.data)
-  );
+        setError("");
 
-  console.log(error.response?.data);
-  console.log(error);
-}
-  };
+        const res =
+          await axios.get(
+            `${API_BASE}/api/weather`,
+            {
+              params: {
+                latitude,
+                longitude,
+              },
 
-  if (!weather) return <p>Loading Weather...</p>;
+              headers: {
+                Authorization:
+                  `Bearer ${localStorage.getItem(
+                    "token"
+                  )}`,
+              },
+            }
+          );
+
+        setWeather(
+          res.data
+        );
+      } catch (err) {
+        console.log(
+          "WeatherWidget error:",
+          err
+        );
+
+        setWeather(
+          null
+        );
+
+        setError(
+          err.response?.data
+            ?.error ||
+          "Weather data unavailable."
+        );
+      } finally {
+        setLoading(
+          false
+        );
+      }
+    };
+
+
+  if (!location) {
+    return (
+      <p>
+        Select a location to view weather.
+      </p>
+    );
+  }
+
+  if (loading) {
+    return (
+      <p>
+        Loading weather...
+      </p>
+    );
+  }
+
+  if (error) {
+    return (
+      <p>
+        {error}
+      </p>
+    );
+  }
+
+  if (!weather) {
+    return (
+      <p>
+        Weather data unavailable.
+      </p>
+    );
+  }
+
 
   return (
     <div>
-      <h2>🌦️ Live Weather</h2>
+      <h2>
+        🌦️ Live Weather
+      </h2>
 
-      <h3>{weather.name}</h3>
+      <h3>
+        {weather.name ||
+          "Selected Location"}
+      </h3>
 
       <p>
-        Temperature: {weather.main.temp}°C
+        Temperature:
+        {" "}
+        {weather.temperature ??
+          "--"}
+        °C
       </p>
 
       <p>
-        Condition: {weather.weather[0].main}
+        Condition:
+        {" "}
+        {weather.condition ||
+          "Unavailable"}
       </p>
     </div>
   );
