@@ -247,10 +247,20 @@ const handleCongestionIncident =
 router.post(
   "/live-update",
   async (req, res) => {
-    console.log(
-  "📡 LIVE UPDATE RECEIVED:",
-  req.body
-);
+    const expectedInternalKey = process.env.INTERNAL_AI_KEY;
+    const suppliedInternalKey = req.headers["x-internal-ai-key"];
+
+    if (
+      !expectedInternalKey ||
+      !suppliedInternalKey ||
+      suppliedInternalKey !== expectedInternalKey
+    ) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized AI live-update request",
+      });
+    }
+
     try {
       const {
         cameraId,

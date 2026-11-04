@@ -222,7 +222,7 @@ IMG_SIZE = max(
     int(
         os.getenv(
             "TRAFFIC_IMG_SIZE",
-            "512",
+            "640",
         )
     ),
 )
@@ -237,8 +237,20 @@ VEHICLE_CONFIDENCE = float(
 ACCIDENT_CONFIDENCE = float(
     os.getenv(
         "TRAFFIC_ACCIDENT_CONFIDENCE",
-        "0.90",
+        "0.50",
     )
+)
+
+# Accident persistence / temporal smoothing.
+# Keep a confirmed accident alive briefly when a later analysis misses it.
+ACCIDENT_MAX_MISSES = max(
+    0,
+    int(
+        os.getenv(
+            "TRAFFIC_ACCIDENT_MAX_MISSES",
+            "2",
+        )
+    ),
 )
 
 # Accident AI is heavier than vehicle detection.
@@ -321,9 +333,11 @@ EMERGENCY_RECOVERY_POLL_INTERVAL = max(
     ),
 )
 
+# The edge MJPEG preview is unauthenticated in this legacy runner. Keep it
+# loopback-only by default; do not expose port 5050 to the LAN or internet.
 STREAM_HOST = os.getenv(
     "TRAFFIC_STREAM_HOST",
-    "0.0.0.0",
+    "127.0.0.1",
 )
 
 STREAM_PORT = int(
@@ -446,6 +460,18 @@ RTSP_STALE_FRAME_TIMEOUT = max(
     ),
 )
 
+# Allow a freshly started FFmpeg process time to establish an RTSP session
+# before the watchdog treats an empty stream as failed.
+RTSP_CONNECT_GRACE_PERIOD = max(
+    RTSP_RECONNECT_COOLDOWN,
+    float(
+        os.getenv(
+            "TRAFFIC_RTSP_CONNECT_GRACE_PERIOD",
+            "20.0",
+        )
+    ),
+)
+
 
 def load_camera_configs():
     if not INTERNAL_AI_KEY:
@@ -532,9 +558,11 @@ def load_camera_configs():
         )
 
     if not camera_configs:
-        raise RuntimeError(
-            "No active AI-enabled cameras were returned by the backend"
+        print(
+            "⚠️ Backend returned no active AI-enabled cameras. "
+            "The edge runner will keep running and retry the registry."
         )
+        return []
 
     print(
         f"✅ Loaded {len(camera_configs)} camera configuration(s) from backend."
@@ -543,7 +571,7 @@ def load_camera_configs():
     for config in camera_configs:
         print(
             f"   {config['cameraId']} → "
-            f"{config['source']}"
+            f"{display_source(config['source'])}"
         )
 
     return camera_configs
@@ -822,9 +850,8 @@ def maybe_refresh_camera_registry(
     now = time.monotonic()
 
     if (
-        now -
-        last_camera_config_refresh
-        < PHASE28_CAMERA_REFRESH_INTERVAL
+        last_camera_config_refresh > 0
+        and now - last_camera_config_refresh < PHASE28_CAMERA_REFRESH_INTERVAL
     ):
         return
 
@@ -835,7 +862,9 @@ def maybe_refresh_camera_registry(
         active,
     )
 
-CAMERA_CONFIGS = load_camera_configs()
+# Populated by main() after the local stream server has started. Avoid
+# failing module import when the backend is temporarily unavailable.
+CAMERA_CONFIGS = []
 
 
 # =========================================================
@@ -892,6 +921,7 @@ class CameraRuntime:
     last_ffmpeg_reconnect: float = 0.0
     ffmpeg_reconnect_attempts: int = 0
     last_ffmpeg_frame_time: float = 0.0
+    ffmpeg_started_at: float = 0.0
 
     last_backend_update: float = 0.0
 
@@ -909,6 +939,11 @@ class CameraRuntime:
     accident_detected: bool = False
     accident_severity: str = "NONE"
     accident_boxes: list = None
+
+    # Temporal accident state.
+    accident_missed_analyses: int = 0
+    accident_candidate_confidence: float = 0.0
+
     last_emergency_analysis: float = 0.0
     emergency_detected: bool = False
     emergency_vehicle_type: str = ""
@@ -1048,6 +1083,7 @@ def _stop_ffmpeg(camera):
     camera.ffmpeg_stop_event = None
     camera.ffmpeg_stream_ready = False
     camera.last_ffmpeg_frame_time = 0.0
+    camera.ffmpeg_started_at = 0.0
 
     if camera.ffmpeg_frame_lock is None:
         camera.ffmpeg_frame_lock = threading.Lock()
@@ -1217,12 +1253,15 @@ def _start_ffmpeg_rtsp(camera):
     except FileNotFoundError as error:
         camera.ffmpeg_process = None
         camera.ffmpeg_stop_event = None
+        camera.ffmpeg_started_at = 0.0
 
         raise RuntimeError(
             "FFmpeg executable was not found. "
             "Install FFmpeg and make sure "
             "the ffmpeg command works in PowerShell."
         ) from error
+
+    camera.ffmpeg_started_at = time.monotonic()
 
     camera.ffmpeg_reader_thread = (
         threading.Thread(
@@ -1294,6 +1333,17 @@ def recover_rtsp_camera(camera):
     stream_not_ready = (
         not camera.ffmpeg_stream_ready
     )
+
+    # A new RTSP/FFmpeg process can take several seconds to negotiate the
+    # stream and deliver its first JPEG frame. Do not kill it during that window.
+    if (
+        not process_dead
+        and not reader_dead
+        and stream_not_ready
+        and camera.ffmpeg_started_at > 0
+        and now - camera.ffmpeg_started_at < RTSP_CONNECT_GRACE_PERIOD
+    ):
+        return False
 
     if not (
         process_dead
@@ -1446,6 +1496,48 @@ def read_camera_frame(camera):
         return False, None
 
     return camera.capture.read()
+
+
+def reactivate_inactive_rtsp_cameras(cameras, active):
+    """Retry RTSP cameras that failed startup or were removed from active.
+
+    A camera is returned to the processing list only after FFmpeg is alive,
+    the reader has produced a recent frame, and that frame can be read.
+    Other cameras continue processing independently.
+    """
+    now = time.monotonic()
+
+    for camera in list(cameras):
+        if camera in active or not is_rtsp_source(camera.source):
+            continue
+
+        process = camera.ffmpeg_process
+        reader = camera.ffmpeg_reader_thread
+        process_alive = process is not None and process.poll() is None
+        reader_alive = reader is not None and reader.is_alive()
+        frame_is_fresh = (
+            camera.last_ffmpeg_frame_time > 0
+            and now - camera.last_ffmpeg_frame_time < RTSP_STALE_FRAME_TIMEOUT
+        )
+
+        if (
+            process_alive
+            and reader_alive
+            and camera.ffmpeg_stream_ready
+            and frame_is_fresh
+        ):
+            success, frame = read_camera_frame(camera)
+            if success and frame is not None:
+                camera.consecutive_failures = 0
+                active.append(camera)
+                print(
+                    "🟢 RTSP camera reactivated | "
+                    f"{camera.camera_id}"
+                )
+                continue
+
+        # Starts a missing/dead stream or restarts one whose reader/frame is stale.
+        recover_rtsp_camera(camera)
 
 
 def warmup_capture(camera):
@@ -3079,7 +3171,10 @@ def send_backend_update(payload):
         response = requests.post(
             BACKEND_URL,
             json=payload,
-            timeout=2,
+            headers={
+                "x-internal-ai-key": INTERNAL_AI_KEY,
+            },
+            timeout=5,
         )
 
         if response.status_code == 200:
@@ -3347,8 +3442,28 @@ def main():
 
 
     # =====================================================
+    # Start local stream server before fetching camera config.
+    # It remains available while the registry or RTSP cameras recover.
+    # =====================================================
+
+    stream_server = start_stream_server()
+
+
+    # =====================================================
     # Create Cameras
     # =====================================================
+
+    global CAMERA_CONFIGS
+
+    try:
+        CAMERA_CONFIGS = load_camera_configs()
+    except Exception as error:
+        CAMERA_CONFIGS = []
+        print(
+            "⚠️ Initial camera configuration unavailable. "
+            "The runner will retry automatically: "
+            f"{error}"
+        )
 
     cameras = []
 
@@ -3444,12 +3559,10 @@ def main():
     ]
 
     if not active:
-
         print(
-            "❌ No cameras are available."
+            "⚠️ No cameras are currently available. "
+            "The edge runner will stay online and retry RTSP connections."
         )
-
-        return
 
 
     print(
@@ -3476,15 +3589,6 @@ def main():
         f"HighRisk={PHASE27_HIGH_RISK_INTERVAL:.2f}s | "
         f"HighCongestion={PHASE27_HIGH_CONGESTION_INTERVAL:.2f}s | "
         f"Normal={PHASE27_NORMAL_INTERVAL:.2f}s"
-    )
-
-
-    # =====================================================
-    # Start Stream Server
-    # =====================================================
-
-    stream_server = (
-        start_stream_server()
     )
 
 
@@ -3548,6 +3652,8 @@ def main():
     # Main Loop
     # =====================================================
 
+    last_no_active_log = 0.0
+
     try:
 
         while True:
@@ -3557,6 +3663,11 @@ def main():
             # -----------------------------------------
 
             maybe_refresh_camera_registry(
+                cameras,
+                active,
+            )
+
+            reactivate_inactive_rtsp_cameras(
                 cameras,
                 active,
             )
@@ -3605,6 +3716,12 @@ def main():
                     else:
 
                         camera.consecutive_failures += 1
+
+                        if is_rtsp_source(camera.source):
+                            # The RTSP watchdog uses process health and frame age.
+                            # Do not evict RTSP cameras after a few fast empty reads;
+                            # leave them monitored so the same camera can recover.
+                            continue
 
                         if (
                             camera.consecutive_failures
@@ -3775,15 +3892,72 @@ def main():
                             )
                         )
 
+                        # =================================================
+                        # ACCIDENT DEBUG
+                        # =================================================
+                        debug_box_count = 0
+
+                        for debug_result in accident_results:
+                            if (
+                                debug_result.boxes is None
+                                or len(debug_result.boxes) == 0
+                            ):
+                                continue
+
+                            for debug_box in debug_result.boxes:
+                                debug_box_count += 1
+
+                                debug_cls_id = int(
+                                    debug_box.cls[0]
+                                )
+
+                                debug_confidence = float(
+                                    debug_box.conf[0]
+                                )
+
+                                debug_class_name = (
+                                    accident_model.names[
+                                        debug_cls_id
+                                    ]
+                                )
+
+                                print(
+                                    "[ACCIDENT DEBUG] "
+                                    f"camera={camera.camera_id} "
+                                    f"class={debug_class_name} "
+                                    f"confidence="
+                                    f"{debug_confidence:.3f}"
+                                )
+
+                        if debug_box_count == 0:
+                            print(
+                                "[ACCIDENT DEBUG] "
+                                f"camera={camera.camera_id} "
+                                "No accident-model boxes detected"
+                            )
+
+
+
                         camera.last_accident_analysis = (
                             processing_now
                         )
 
-                        camera.accident_detected = False
-                        camera.accident_severity = "NONE"
-                        camera.accident_boxes = []
+                        # =================================================
+                        # TEMPORAL ACCIDENT PERSISTENCE
+                        # =================================================
+                        # A fresh Accident detection immediately activates
+                        # the alert. Short detector misses do not instantly
+                        # erase the confirmed state.
+                        current_accident_boxes = []
+                        current_max_accident_confidence = 0.0
 
                         for result in accident_results:
+
+                            if (
+                                result.boxes is None
+                                or len(result.boxes) == 0
+                            ):
+                                continue
 
                             for box in result.boxes:
 
@@ -3807,15 +3981,12 @@ def main():
                                     >= ACCIDENT_CONFIDENCE
                                 ):
 
-                                    camera.accident_detected = True
-                                    camera.accident_severity = "HIGH"
-
                                     x1, y1, x2, y2 = map(
                                         int,
                                         box.xyxy[0],
                                     )
 
-                                    camera.accident_boxes.append(
+                                    current_accident_boxes.append(
                                         (
                                             x1,
                                             y1,
@@ -3824,6 +3995,64 @@ def main():
                                             confidence,
                                         )
                                     )
+
+                                    current_max_accident_confidence = max(
+                                        current_max_accident_confidence,
+                                        confidence,
+                                    )
+
+                        if current_accident_boxes:
+                            camera.accident_detected = True
+                            camera.accident_severity = "HIGH"
+                            camera.accident_missed_analyses = 0
+                            camera.accident_candidate_confidence = (
+                                current_max_accident_confidence
+                            )
+                            camera.accident_boxes = (
+                                current_accident_boxes
+                            )
+
+                            print(
+                                "[ACCIDENT CONFIRMED] "
+                                f"camera={camera.camera_id} "
+                                f"confidence="
+                                f"{current_max_accident_confidence:.3f}"
+                            )
+
+                        elif camera.accident_detected:
+                            camera.accident_missed_analyses += 1
+
+                            if (
+                                camera.accident_missed_analyses
+                                <= ACCIDENT_MAX_MISSES
+                            ):
+                                print(
+                                    "[ACCIDENT PERSISTED] "
+                                    f"camera={camera.camera_id} "
+                                    f"miss="
+                                    f"{camera.accident_missed_analyses}/"
+                                    f"{ACCIDENT_MAX_MISSES} "
+                                    f"last_confidence="
+                                    f"{camera.accident_candidate_confidence:.3f}"
+                                )
+                            else:
+                                camera.accident_detected = False
+                                camera.accident_severity = "NONE"
+                                camera.accident_boxes = []
+                                camera.accident_missed_analyses = 0
+                                camera.accident_candidate_confidence = 0.0
+
+                                print(
+                                    "[ACCIDENT CLEARED] "
+                                    f"camera={camera.camera_id} "
+                                    "no fresh accident evidence"
+                                )
+
+                        else:
+                            camera.accident_severity = "NONE"
+                            camera.accident_boxes = []
+                            camera.accident_missed_analyses = 0
+                            camera.accident_candidate_confidence = 0.0
 
                     except Exception as error:
 
@@ -4256,12 +4485,13 @@ def main():
 
 
             if not active:
-
-                print(
-                    "❌ No active cameras remain."
-                )
-
-                break
+                now = time.monotonic()
+                if now - last_no_active_log >= 15.0:
+                    print(
+                        "⚠️ No active cameras. The runner is still alive "
+                        "and will retry the RTSP registry/connections."
+                    )
+                    last_no_active_log = now
 
 
             if not HEADLESS:
@@ -4277,7 +4507,7 @@ def main():
             else:
 
                 time.sleep(
-                    0.001
+                    1.0 if not active else 0.001
                 )
 
 

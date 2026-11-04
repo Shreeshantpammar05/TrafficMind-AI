@@ -1,3 +1,4 @@
+import { API_BASE } from "../config/api.js";
 import {
   useEffect,
   useMemo,
@@ -18,9 +19,7 @@ import {
   useMap,
 } from "react-leaflet";
 
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://localhost:5000";
+
 
 const NEARBY_RADIUS_KM = Number(
   import.meta.env

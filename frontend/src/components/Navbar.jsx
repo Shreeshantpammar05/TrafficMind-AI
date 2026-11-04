@@ -1,3 +1,4 @@
+import { API_BASE } from "../config/api.js";
 import { FaBars, FaBell } from "react-icons/fa";
 import OfficerAlertPanel from "./OfficerAlertPanel";
 
@@ -6,8 +7,7 @@ import { useEffect, useState } from "react";
 import { useTheme } from "../theme/ThemeContext";
 import { FaMoon, FaSun } from "react-icons/fa";
 
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+
 
 function Navbar({
   toggleSidebar,

@@ -68,3 +68,10 @@ backend/ai/models/
 *.pt
 # backend/ai/ai_models/
 backend/yolov8n.pt
+# TrafficMind AI - required runtime models
+!backend/ai/ai_models/yolov8n.pt
+!backend/ai/ai_models/accident_detector.pt
+!backend/ai/ai_models/emergency.pt
+
+# Generated AI test images
+/backend/ai/accident_model_test_output/

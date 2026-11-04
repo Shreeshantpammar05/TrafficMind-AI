@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 const notificationRoutes = require("./routes/notificationRoutes");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -12,7 +14,6 @@ const User = require("./models/User");
 const Prediction = require("./models/Prediction");
 const uploadRoutes =
   require("./routes/uploadRoutes");
-require("dotenv").config();
 
 const signalRoutes =
   require("./routes/signalRoutes");
@@ -37,13 +38,25 @@ const analysisRoutes =
 
   const nearbyServicesRoutes = require("./routes/nearbyServices");
 
+const configuredFrontendOrigins = (
+  process.env.FRONTEND_URLS || process.env.FRONTEND_URL || ""
+)
+  .split(",")
+  .map((origin) => origin.trim().replace(/\/+$/, ""))
+  .filter(Boolean);
+
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://traffic-mind-ai-gamma.vercel.app",
+  "https://traffic-mind-ai-git-main-shreeshantpammar-7302s-projects.vercel.app",
+  ...configuredFrontendOrigins,
+];
+
+const uniqueAllowedOrigins = [...new Set(allowedOrigins)];
+
 const io = new Server(server, {
   cors: {
-    origin: [
-      "http://localhost:5173",
-      "https://traffic-mind-ai-gamma.vercel.app",
-      "https://traffic-mind-ai-git-main-shreeshantpammar-7302s-projects.vercel.app",
-    ],
+    origin: uniqueAllowedOrigins,
     methods: ["GET", "POST"],
   },
 });
@@ -118,11 +131,7 @@ const userRoutes =
 
 app.use(
   cors({
-    origin: [
-      "http://localhost:5173",
-      "https://traffic-mind-ai-gamma.vercel.app",
-      "https://traffic-mind-ai-git-main-shreeshantpammar-7302s-projects.vercel.app",
-    ],
+    origin: uniqueAllowedOrigins,
     credentials: true,
   })
 );
@@ -295,7 +304,12 @@ app.use("/api", nearbyServicesRoutes);
 
 console.log("URI exists:", !!process.env.MONGO_URI);
 
-mongoose.connect(process.env.MONGO_URI)
+mongoose.connect(process.env.MONGO_URI, {
+  family: 4,
+  serverSelectionTimeoutMS: 10000,
+  connectTimeoutMS: 10000,
+  socketTimeoutMS: 45000,
+})
   .then(() => {
     console.log("✅ MongoDB Connected");
   })
@@ -306,6 +320,19 @@ mongoose.connect(process.env.MONGO_URI)
 
 app.get("/", (req, res) => {
   res.send("TrafficMind AI Backend Running");
+});
+
+// Lightweight deployment check. A 503 means MongoDB is not connected.
+app.get("/api/health", (req, res) => {
+  const databaseState = mongoose.connection.readyState;
+  const databaseConnected = databaseState === 1;
+
+  return res.status(databaseConnected ? 200 : 503).json({
+    success: databaseConnected,
+    status: databaseConnected ? "ok" : "degraded",
+    database: databaseConnected ? "connected" : "disconnected",
+    databaseState,
+  });
 });
 
 app.get(
@@ -479,6 +506,12 @@ app.post(
   "/api/register",
   async (req, res) => {
     try {
+      if (mongoose.connection.readyState !== 1) {
+        return res.status(503).json({
+          success: false,
+          message: "Registration is temporarily unavailable because the database is not connected.",
+        });
+      }
      const {
   name,
   email,
@@ -488,7 +521,7 @@ app.post(
   governmentOfficerType,
   jurisdictionDistrict,
   jurisdictionArea,
-} = req.body;
+} = req.body || {};
 
       const allowedRoles = [
         "citizen",
@@ -513,8 +546,11 @@ app.post(
       }
 
       if (
-        !name ||
-        !email ||
+        typeof name !== "string" ||
+        typeof email !== "string" ||
+        typeof password !== "string" ||
+        !name.trim() ||
+        !email.trim() ||
         !password
       ) {
         return res.status(400).json({
@@ -619,9 +655,12 @@ if (
   });
 }
 
+      const normalizedEmail =
+        email.trim().toLowerCase();
+
       const existingUser =
         await User.findOne({
-          email,
+          email: normalizedEmail,
         });
 
       if (existingUser) {
@@ -644,7 +683,7 @@ if (
       name.trim(),
 
     email:
-      email.trim().toLowerCase(),
+      normalizedEmail,
 
     password:
       hashedPassword,
@@ -708,10 +747,21 @@ if (
         error
       );
 
-      res.status(500).json({
+      if (error && error.code === 11000) {
+        return res.status(409).json({
+          success: false,
+          message: "An account with this email already exists.",
+        });
+      }
+
+      const databaseUnavailable =
+        mongoose.connection.readyState !== 1;
+
+      return res.status(databaseUnavailable ? 503 : 500).json({
         success: false,
-        error:
-          error.message,
+        message: databaseUnavailable
+          ? "Registration is temporarily unavailable because the database is not connected."
+          : "Registration failed due to a server error. Please try again.",
       });
     }
   }
@@ -925,6 +975,6 @@ const PORT = process.env.PORT || 5000;
 
 
 
-server.listen(PORT, () => {
+server.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });

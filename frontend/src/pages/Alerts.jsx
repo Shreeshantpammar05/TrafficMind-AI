@@ -1,3 +1,4 @@
+import { API_BASE } from "../config/api.js";
 import MainLayout from "../layouts/MainLayout";
 
 import {
@@ -18,9 +19,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://localhost:5000";
+
 
 const ALERT_TABS = [
   {

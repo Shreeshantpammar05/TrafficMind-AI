@@ -1,3 +1,4 @@
+import { API_BASE } from "../config/api.js";
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 
@@ -17,9 +18,7 @@ import {
   FaSyncAlt,
 } from "react-icons/fa";
 
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://localhost:5000";
+
 
 const STATUS_FLOW = {
   SENT: {

@@ -1,3 +1,4 @@
+import { API_BASE } from "../config/api.js";
 import {
   useEffect,
   useState,
@@ -8,9 +9,7 @@ import MainLayout from "../layouts/MainLayout";
 
 import AdminAnalytics from "../components/AdminAnalytics";
 
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://localhost:5000";
+
 
 function AdminCenter() {
   const [governmentUsers, setGovernmentUsers] =

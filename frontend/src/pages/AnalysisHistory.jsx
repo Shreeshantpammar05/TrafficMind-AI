@@ -1,3 +1,4 @@
+import { API_BASE } from "../config/api.js";
 import BackButton from "../components/BackButton";
 import MainLayout from "../layouts/MainLayout";
 
@@ -29,9 +30,7 @@ function AnalysisHistory() {
   const [loading, setLoading] =
     useState(true);
 
-  const API_BASE =
-    import.meta.env.VITE_API_BASE_URL ||
-    "http://localhost:5000";
+
 
   useEffect(() => {
     fetchHistory();

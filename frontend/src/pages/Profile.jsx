@@ -1,3 +1,4 @@
+import { API_BASE } from "../config/api.js";
 import MainLayout from "../layouts/MainLayout";
 import {
   useEffect,
@@ -33,10 +34,7 @@ function Profile() {
   const [error, setError] =
     useState("");
 
-  const API_BASE =
-    import.meta.env
-      .VITE_API_BASE_URL ||
-    "http://localhost:5000";
+
 
   useEffect(() => {
     const fetchProfile =
@@ -451,7 +449,7 @@ function Profile() {
               }}
             >
               <FaUser/>
-              
+
             </div>
 
             <div

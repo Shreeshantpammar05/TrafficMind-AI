@@ -1,3 +1,4 @@
+import { API_BASE } from "../config/api.js";
 import MainLayout from "../layouts/MainLayout";
 import TrafficMap from "./TrafficMap";
 import WeatherScene from "./WeatherScene";
@@ -33,9 +34,7 @@ import "./Dashboard.css";
 // API CONFIG
 // =========================================================
 
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://localhost:5000";
+
 
 const SMART_ROUTE_API =
   import.meta.env.VITE_SMART_ROUTE_API ||

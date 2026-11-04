@@ -1,3 +1,4 @@
+import { API_BASE } from "../config/api.js";
 import { useEffect, useState } from "react";
 import axios from "axios";
 import socket from "../socket";
@@ -5,9 +6,7 @@ import socket from "../socket";
 function EmergencyAlerts() {
   const [alerts, setAlerts] = useState([]);
 
-  const API_BASE =
-    import.meta.env.VITE_API_BASE_URL ||
-    "http://localhost:5000";
+
 
   useEffect(() => {
     fetchAlerts();

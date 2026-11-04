@@ -1,3 +1,4 @@
+import { API_BASE as BASE_URL } from "../config/api.js";
 import BackButton from "../components/BackButton";
 import MainLayout from "../layouts/MainLayout";
 
@@ -9,9 +10,7 @@ import {
   useState,
 } from "react";
 
-const BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://localhost:5000";
+
 
 const YOLO_STREAM_BASE =
   import.meta.env.VITE_YOLO_STREAM_BASE_URL ||

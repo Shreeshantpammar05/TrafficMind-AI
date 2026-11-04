@@ -1,3 +1,4 @@
+import { API_BASE } from "../config/api.js";
 import { useState } from "react";
 import axios from "axios";
 import {
@@ -24,9 +25,7 @@ function Register() {
   const [loading, setLoading] =
     useState(false);
 
-  const API_BASE =
-    import.meta.env.VITE_API_BASE_URL ||
-    "http://localhost:5000";
+
 
   const handleChange = (e) => {
     const {
@@ -173,9 +172,10 @@ function Register() {
         navigate("/login");
       } catch (error) {
         alert(
-          error.response?.data
-            ?.message ||
-            "Registration Failed"
+          error.response?.data?.message ||
+            error.response?.data?.error ||
+            error.message ||
+            "Registration failed. Please try again."
         );
       } finally {
         setLoading(false);

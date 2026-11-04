@@ -1,3 +1,4 @@
+import { API_BASE } from "../config/api.js";
 import { useEffect, useState } from "react";
 import axios from "axios";
 
@@ -11,9 +12,7 @@ function AdminAnalytics() {
   const [loading, setLoading] =
     useState(true);
 
-  const API_BASE =
-    import.meta.env.VITE_API_BASE_URL ||
-    "http://localhost:5000";
+
 
   useEffect(() => {
     fetchAnalytics();

@@ -52,9 +52,11 @@ async function syncOfficerIntelligence(
     return null;
   }
 
-  const backendRoot =
+  const backendPort = process.env.PORT || 5000;
+  const backendRoot = (
     process.env.INTERNAL_BACKEND_ROOT ||
-    "http://localhost:5000";
+    `http://127.0.0.1:${backendPort}`
+  ).replace(/\/+$/, "");
 
   const url =
     `${backendRoot}/api/officer-alerts/internal/sync/${encodeURIComponent(

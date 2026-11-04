@@ -1,0 +1,6 @@
+
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+!.env.edge.example

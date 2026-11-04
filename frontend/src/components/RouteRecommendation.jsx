@@ -1,4 +1,5 @@
 import axios from "axios";
+import { API_BASE } from "../config/api.js";
 import { useState } from "react";
 
 function RouteRecommendation() {
@@ -8,7 +9,7 @@ function RouteRecommendation() {
 
   const getCoordinates = async (place) => {
     const res = await axios.get(
-      "http://localhost:5000/api/routes/geocode",
+      `${API_BASE}/api/routes/geocode`,
       {
         params: {
           text: `${place}, Bangalore, Karnataka, India`,
@@ -45,7 +46,7 @@ function RouteRecommendation() {
         await getCoordinates(destination);
 
       const routeRes = await axios.post(
-        "http://localhost:5000/api/routes/directions",
+        `${API_BASE}/api/routes/directions`,
         {
           start: startCoords,
           end: endCoords,

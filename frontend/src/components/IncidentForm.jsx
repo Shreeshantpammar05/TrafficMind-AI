@@ -1,9 +1,8 @@
+import { API_BASE } from "../config/api.js";
 import { useState } from "react";
 import axios from "axios";
 
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://localhost:5000";
+
 
 function IncidentForm() {
   const [formData, setFormData] =
