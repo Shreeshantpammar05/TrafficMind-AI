@@ -27,7 +27,10 @@ services:
       - key: INTERNAL_AI_KEY
         generateValue: true
       - key: FRONTEND_URL
-        sync: false
+        fromService:
+          name: trafficmind-ai-web-migration
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
 
   - type: web
     name: trafficmind-ai-web-migration
