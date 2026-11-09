@@ -1,3 +1,4 @@
+import { icon as leafletIcon } from "leaflet";
 import { API_BASE } from "../config/api.js";
 import {
   useEffect,
@@ -26,6 +27,26 @@ const NEARBY_RADIUS_KM = Number(
     .VITE_TRAFFIC_NEARBY_RADIUS_KM ||
     "5"
 );
+
+const locationMarkerSvg = `
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="36" height="46" viewBox="0 0 36 46">
+  <path
+    d="M18 1C8.6 1 1 8.6 1 18c0 12 17 27 17 27s17-15 17-27C35 8.6 27.4 1 18 1Z"
+    fill="#2563EB"
+    stroke="#FFFFFF"
+    stroke-width="2"
+  />
+  <circle cx="18" cy="18" r="6" fill="#FFFFFF"/>
+</svg>
+`;
+
+const CURRENT_LOCATION_ICON = leafletIcon({
+  iconUrl: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(locationMarkerSvg)}`,
+  iconSize: [36, 46],
+  iconAnchor: [18, 45],
+  popupAnchor: [0, -42],
+});
 
 // =========================================================
 // MAP HELPERS
@@ -1017,11 +1038,12 @@ function TrafficMap({
             />
 
             <Marker
-              position={[
-                location.latitude,
-                location.longitude,
-              ]}
-            >
+  position={[
+    location.latitude,
+    location.longitude,
+  ]}
+  icon={CURRENT_LOCATION_ICON}
+>
               <Popup>
                 <strong>
                   📍 Selected Location
