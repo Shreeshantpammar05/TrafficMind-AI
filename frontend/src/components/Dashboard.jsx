@@ -40,9 +40,7 @@ const SMART_ROUTE_API =
   import.meta.env.VITE_SMART_ROUTE_API ||
   `${API_BASE}/api/routes/directions`;
 
-const GEOCODING_API_BASE =
-  import.meta.env.VITE_GEOCODING_API_BASE_URL ||
-  "https://nominatim.openstreetmap.org";
+const GEOCODING_API_BASE = `${API_BASE}/api/geocoding`;
 
 
 // =========================================================

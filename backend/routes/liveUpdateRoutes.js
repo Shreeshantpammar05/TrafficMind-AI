@@ -1,6 +1,7 @@
 const express = require("express");
 
 const Incident = require("../models/Incident");
+const demoControlRoutes = require("./demoControlRoutes");
 
 const TrafficCamera =
   require("../models/TrafficCamera");
@@ -133,9 +134,10 @@ const handleCongestionIncident =
     vehicleCount,
     congestion,
   }) => {
+    const sourceMode = demoControlRoutes.isDemoSessionActive() ? "DEMO" : "LIVE";
     try {
       const incidentKey =
-        `${cameraId}:Traffic Congestion`;
+        `${cameraId}:Traffic Congestion:${sourceMode}`;
 
       const now = Date.now();
 
@@ -183,6 +185,11 @@ const handleCongestionIncident =
           location:
             "AI Camera Zone",
 
+          sourceMode:
+            sourceMode === "DEMO"
+              ? "DEMO"
+              : { $in: ["LIVE", null] },
+
           createdAt: {
             $gte: new Date(
               now -
@@ -200,6 +207,8 @@ const handleCongestionIncident =
       }
 
       await Incident.create({
+        sourceMode,
+
         location:
           "AI Camera Zone",
 

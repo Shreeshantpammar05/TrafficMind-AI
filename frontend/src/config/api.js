@@ -1,9 +1,12 @@
-// Shared API origin for all frontend HTTP and Socket.IO requests.
-// Vercel can override this at build time with VITE_API_BASE_URL.
-const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.trim();
+// Shared API origin for HTTP and Socket.IO requests.
+// Can be overridden using VITE_API_BASE_URL.
 
-const defaultApiBase = import.meta.env.PROD
-  ? "https://trafficmind-ai.onrender.com"
-  : "http://localhost:5000";
+const configuredApiBase =
+  import.meta.env.VITE_API_BASE_URL?.trim();
 
-export const API_BASE = (configuredApiBase || defaultApiBase).replace(/\/+$/, "");
+const defaultApiBase =
+  "https://trafficmind-ai-api-migration.onrender.com";
+
+export const API_BASE = (
+  configuredApiBase || defaultApiBase
+).replace(/\/+$/, "");

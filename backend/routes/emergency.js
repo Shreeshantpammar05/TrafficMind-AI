@@ -2,6 +2,7 @@ const express = require("express");
 const crypto = require("crypto");
 
 const router = express.Router();
+const demoControlRoutes = require("./demoControlRoutes");
 
 const latestDetection =
   require("../data/latestDetection");
@@ -626,6 +627,7 @@ router.post(
       let event =
         await EmergencyEvent.findOne(
           {
+            sourceMode: demoControlRoutes.isDemoSessionActive() ? "DEMO" : { $in: ["LIVE", null] },
             vehicleType,
 
             currentCameraId:
@@ -641,6 +643,10 @@ router.post(
         });
 
       if (event) {
+        if (event.source === "AI_DETECTED") {
+          event.sourceMode = demoControlRoutes.isDemoSessionActive() ? "DEMO" : "LIVE";
+        }
+
         event.previousCameraId =
           event.currentCameraId;
 
@@ -762,6 +768,8 @@ router.post(
 
             source:
               "AI_DETECTED",
+
+            sourceMode: demoControlRoutes.isDemoSessionActive() ? "DEMO" : "LIVE",
 
             status:
               "TRACKING",

@@ -1,6 +1,6 @@
 require("dotenv").config();
 const demoControlRoutes = require("./routes/demoControlRoutes");
-
+const geocodingRoutes = require("./routes/geocodingRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -304,10 +304,12 @@ app.use("/api/alerts", alertRoutes);
 app.use("/api", nearbyServicesRoutes);
 
 app.use("/api/demo-control", demoControlRoutes);
+app.use("/api/geocoding", geocodingRoutes);
 
 console.log("URI exists:", !!process.env.MONGO_URI);
 
 mongoose.connect(process.env.MONGO_URI, {
+  dbName: "trafficmind_ai_staging",
   family: 4,
   serverSelectionTimeoutMS: 10000,
   connectTimeoutMS: 10000,
@@ -779,16 +781,21 @@ app.post(
         password,
       } = req.body;
 
-      if (!email || !password) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Email and password are required",
-        });
-      }
+      const normalizedEmail =
+  typeof email === "string"
+    ? email.trim().toLowerCase()
+    : "";
 
-      const user =
-        await User.findOne({ email });
+if (!normalizedEmail || typeof password !== "string" || !password) {
+  return res.status(400).json({
+    success: false,
+    message: "Email and password are required",
+  });
+}
+
+const user = await User.findOne({
+  email: normalizedEmail,
+});
 
       if (!user) {
         return res.status(400).json({
@@ -853,7 +860,11 @@ app.post(
     verificationStatus:
       user.verificationStatus,
   },
-  process.env.JWT_SECRET
+  process.env.JWT_SECRET,
+  {
+    expiresIn: "8h",
+    algorithm: "HS256",
+  }
 );
       console.log(
         "LOGIN SUCCESS:",

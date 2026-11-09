@@ -30,6 +30,13 @@ const emergencyEventSchema =
         required: true,
       },
 
+      sourceMode: {
+        type: String,
+        enum: ["LIVE", "DEMO"],
+        default: "LIVE",
+        index: true,
+      },
+
       status: {
         type: String,
         enum: [

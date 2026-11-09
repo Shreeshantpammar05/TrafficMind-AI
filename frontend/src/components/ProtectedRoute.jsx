@@ -52,7 +52,7 @@ function PendingGovernmentAccess() {
         <div
           style={{
             fontSize:
-              "48px",
+              "40px",
             marginBottom:
               "15px",
           }}
@@ -65,7 +65,7 @@ function PendingGovernmentAccess() {
         <h1
           style={{
             margin:
-              "0 0 10px",
+              "0 0 25px",
             color:
               "var(--text-primary)",
           }}
@@ -84,7 +84,7 @@ function PendingGovernmentAccess() {
             margin:
               "0 auto",
             maxWidth:
-              "460px",
+              "350px",
           }}
         >
           {isRejected

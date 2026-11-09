@@ -1,6 +1,10 @@
+
+
 import numpy as np
 import os
 import re
+import base64
+import json
 import time
 import threading
 import subprocess
@@ -13,7 +17,7 @@ import cv2
 import requests
 from ultralytics import YOLO
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv, dotenv_values
 
 BASE_DIR = os.path.dirname(
     os.path.abspath(__file__)
@@ -23,12 +27,21 @@ BACKEND_DIR = os.path.dirname(
     BASE_DIR
 )
 
-load_dotenv(
-    os.path.join(
-        BACKEND_DIR,
-        ".env"
-    )
-)
+PERFORMANCE_ENV_PATH = os.path.join(BACKEND_DIR, ".env")
+load_dotenv(PERFORMANCE_ENV_PATH)
+
+# The backend/.env file is the source of truth for these local performance
+# settings. This avoids an old inherited PowerShell environment variable
+# silently overriding the values the operator has just configured.
+_PERFORMANCE_ENV = dotenv_values(PERFORMANCE_ENV_PATH)
+for _performance_key in (
+    "TRAFFIC_AI_NORMAL_INTERVAL",
+    "TRAFFIC_AI_HIGH_CONGESTION_INTERVAL",
+    "TRAFFIC_AI_HIGH_RISK_INTERVAL",
+):
+    _performance_value = _PERFORMANCE_ENV.get(_performance_key)
+    if _performance_value is not None and str(_performance_value).strip():
+        os.environ[_performance_key] = str(_performance_value).strip()
 
 
 # =========================================================
@@ -110,7 +123,7 @@ PHASE27_HIGH_RISK_INTERVAL = max(
     float(
         os.getenv(
             "TRAFFIC_AI_HIGH_RISK_INTERVAL",
-            "1.5",
+            "1.0",
         )
     ),
 )
@@ -120,7 +133,7 @@ PHASE27_HIGH_CONGESTION_INTERVAL = max(
     float(
         os.getenv(
             "TRAFFIC_AI_HIGH_CONGESTION_INTERVAL",
-            "2.5",
+            "1.5",
         )
     ),
 )
@@ -130,7 +143,7 @@ PHASE27_NORMAL_INTERVAL = max(
     float(
         os.getenv(
             "TRAFFIC_AI_NORMAL_INTERVAL",
-            "5.0",
+            "2.5",
         )
     ),
 )
@@ -915,6 +928,13 @@ class CameraRuntime:
 
     last_inference_reason: str = "startup"
 
+    # Lightweight optical-flow tracks keep vehicle boxes aligned between
+    # slower YOLO inference cycles. Fresh YOLO detections reset these tracks.
+    vehicle_tracks: list = None
+    vehicle_previous_gray: object = None
+    vehicle_track_frame_count: int = 0
+    vehicle_tracks_last_detection: float = 0.0
+
     # =====================================================
     # Phase 27/28 — RTSP reliability state
     # =====================================================
@@ -1048,23 +1068,49 @@ def is_network_stream(source):
 
 
 EMERGENCY_CLASS_MAP = {
-    "Ambulance": "ambulance",
-    "Fire_Truck": "fire_truck",
-    "Police": "police_vehicle",
+    "ambulance": "ambulance",
+    "fire_truck": "fire_truck",
+    "firetruck": "fire_truck",
+    "police": "police_vehicle",
+    "police_vehicle": "police_vehicle",
 }
 
 
 def normalize_emergency_type(class_name):
-    return EMERGENCY_CLASS_MAP.get(
-        class_name
+    """Return a canonical emergency type for a model class label.
+
+    Class labels are normalized so capitalization, spaces and hyphens do not
+    cause valid emergency detections to be discarded. Generic vehicles and
+    unknown classes intentionally return None.
+    """
+    if class_name is None:
+        return None
+
+    normalized_name = (
+        str(class_name)
+        .strip()
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
     )
 
+    return EMERGENCY_CLASS_MAP.get(normalized_name)
 
+
+# RTSP_READER_STABILITY_PATCH_V1
 def _stop_ffmpeg(camera):
-    if camera.ffmpeg_stop_event is not None:
-        camera.ffmpeg_stop_event.set()
+    """Stop one RTSP reader cleanly before another session is started.
 
+    Keep local references to the old process/thread/event. The reader must
+    never observe a replacement stop event or clear state belonging to a
+    newer FFmpeg process.
+    """
+    stop_event = camera.ffmpeg_stop_event
     process = camera.ffmpeg_process
+    reader_thread = camera.ffmpeg_reader_thread
+
+    if stop_event is not None:
+        stop_event.set()
 
     if process is not None:
         try:
@@ -1072,15 +1118,50 @@ def _stop_ffmpeg(camera):
                 process.terminate()
 
                 try:
-                    process.wait(timeout=2)
+                    process.wait(timeout=3)
                 except subprocess.TimeoutExpired:
                     process.kill()
+                    process.wait(timeout=3)
+        except Exception as error:
+            print(
+                f"⚠️ FFmpeg stop warning {camera.camera_id}: {error}"
+            )
+
+        try:
+            if process.stdout is not None and not process.stdout.closed:
+                process.stdout.close()
         except Exception:
             pass
 
-    camera.ffmpeg_process = None
-    camera.ffmpeg_reader_thread = None
-    camera.ffmpeg_stop_event = None
+    if (
+        reader_thread is not None
+        and reader_thread is not threading.current_thread()
+        and reader_thread.is_alive()
+    ):
+        reader_thread.join(timeout=4)
+
+        if reader_thread.is_alive():
+            try:
+                if process is not None and process.stdout is not None:
+                    process.stdout.close()
+            except Exception:
+                pass
+            reader_thread.join(timeout=2)
+
+        if reader_thread.is_alive():
+            print(
+                f"⚠️ FFmpeg reader did not exit promptly: {camera.camera_id}"
+            )
+
+    if camera.ffmpeg_process is process:
+        camera.ffmpeg_process = None
+
+    if camera.ffmpeg_reader_thread is reader_thread:
+        camera.ffmpeg_reader_thread = None
+
+    if camera.ffmpeg_stop_event is stop_event:
+        camera.ffmpeg_stop_event = None
+
     camera.ffmpeg_stream_ready = False
     camera.last_ffmpeg_frame_time = 0.0
     camera.ffmpeg_started_at = 0.0
@@ -1091,105 +1172,109 @@ def _stop_ffmpeg(camera):
     with camera.ffmpeg_frame_lock:
         camera.latest_ffmpeg_frame = None
 
-
 def _ffmpeg_reader(camera):
+    """Drain FFmpeg MJPEG output and publish only the newest decoded frame.
+
+    Process, stop-event and lock references are captured once. Reconnects
+    create a new generation, so an old reader can never update/clear the new
+    generation's camera state.
+    """
     process = camera.ffmpeg_process
+    stop_event = camera.ffmpeg_stop_event
+    frame_lock = camera.ffmpeg_frame_lock
 
     if (
         process is None
         or process.stdout is None
-        or camera.ffmpeg_stop_event is None
+        or stop_event is None
     ):
         return
 
+    if frame_lock is None:
+        frame_lock = threading.Lock()
+        camera.ffmpeg_frame_lock = frame_lock
+
     buffer = bytearray()
 
-    while not camera.ffmpeg_stop_event.is_set():
-        try:
-            chunk = process.stdout.read(16384)
+    try:
+        while not stop_event.is_set():
+            try:
+                chunk = process.stdout.read(16384)
+            except (OSError, ValueError) as error:
+                if not stop_event.is_set():
+                    print(
+                        f"⚠️ FFmpeg reader error "
+                        f"{camera.camera_id}: {error}"
+                    )
+                break
 
             if not chunk:
                 break
 
             buffer.extend(chunk)
+            newest_jpeg = None
 
+            # Extract every complete JPEG in this chunk, but decode only the
+            # newest one. This drops stale buffered frames instead of building
+            # latency while preserving any incomplete trailing JPEG.
             while True:
-                # JPEG start marker
                 start = buffer.find(b"\xff\xd8")
 
                 if start == -1:
-                    # Keep the buffer from growing forever.
                     if len(buffer) > 2 * 1024 * 1024:
-                        del buffer[:-2]
-
+                        del buffer[:-1]
                     break
 
-                # JPEG end marker
-                end = buffer.find(
-                    b"\xff\xd9",
-                    start + 2,
-                )
+                if start > 0:
+                    del buffer[:start]
+
+                end = buffer.find(b"\xff\xd9", 2)
 
                 if end == -1:
-                    # Complete JPEG has not arrived yet.
-                    if start > 0:
-                        del buffer[:start]
-
+                    if len(buffer) > 4 * 1024 * 1024:
+                        buffer.clear()
                     break
 
-                # Include the two-byte JPEG end marker.
-                jpeg_bytes = bytes(
-                    buffer[
-                        start : end + 2
-                    ]
-                )
+                newest_jpeg = bytes(buffer[:end + 2])
+                del buffer[:end + 2]
 
-                # Remove the frame from the buffer.
-                del buffer[: end + 2]
+            if newest_jpeg is None:
+                continue
 
-                array = np.frombuffer(
-                    jpeg_bytes,
-                    dtype=np.uint8,
-                )
+            array = np.frombuffer(
+                newest_jpeg,
+                dtype=np.uint8,
+            )
+            frame = cv2.imdecode(
+                array,
+                cv2.IMREAD_COLOR,
+            )
 
-                frame = cv2.imdecode(
-                    array,
-                    cv2.IMREAD_COLOR,
-                )
+            if frame is None:
+                continue
 
-                if frame is None:
-                    continue
-
-                if camera.ffmpeg_frame_lock is None:
-                    camera.ffmpeg_frame_lock = (
-                        threading.Lock()
-                    )
-
-                with camera.ffmpeg_frame_lock:
-                    camera.latest_ffmpeg_frame = frame
-                    camera.ffmpeg_stream_ready = True
-
-                camera.last_ffmpeg_frame_time = (
-                    time.monotonic()
-                )
-
-                camera.ffmpeg_reconnect_attempts = 0
-
-                # We only need the latest frame.
-                # Don't process old buffered frames.
-                buffer.clear()
-
+            if camera.ffmpeg_process is not process:
                 break
 
-        except Exception as error:
+            with frame_lock:
+                if camera.ffmpeg_process is not process:
+                    break
+                camera.latest_ffmpeg_frame = frame
+
+            camera.ffmpeg_stream_ready = True
+            camera.last_ffmpeg_frame_time = time.monotonic()
+            camera.ffmpeg_reconnect_attempts = 0
+
+    except Exception as error:  # noqa: BLE001
+        if not stop_event.is_set():
             print(
                 f"⚠️ FFmpeg reader error "
                 f"{camera.camera_id}: {error}"
             )
-            break
 
-    camera.ffmpeg_stream_ready = False
-
+    finally:
+        if camera.ffmpeg_process is process:
+            camera.ffmpeg_stream_ready = False
 
 def _start_ffmpeg_rtsp(camera):
     source = str(camera.source).strip()
@@ -1696,6 +1781,18 @@ def update_live_frame(
 # =========================================================
 
 cameras_by_id = {}
+# Shared YOLO models for camera and uploaded-image inference.
+AI_MODELS = {
+    "vehicle": None,
+    "accident": None,
+    "emergency": None,
+}
+
+# Indicates when all YOLO models have finished loading.
+AI_MODELS_READY = threading.Event()
+
+# Prevents simultaneous GPU inference from competing requests.
+AI_INFERENCE_LOCK = threading.RLock()
 
 emergency_tracking_lock = threading.Lock()
 
@@ -1722,6 +1819,302 @@ class LiveStreamHandler(
         *args,
     ):
         return
+
+
+    def do_POST(self):
+        path = self.path.split("?", 1)[0]
+
+        if path != "/analyze-image":
+            self.send_error(404, "Endpoint not found")
+            return
+
+        def send_json(status, payload):
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
+        if not AI_MODELS_READY.is_set():
+            send_json(503, {
+                "success": False,
+                "error": "YOLO models are not ready."
+            })
+            return
+
+        content_type = (
+            self.headers.get("Content-Type", "")
+            .split(";", 1)[0]
+            .strip()
+            .lower()
+        )
+
+        allowed_content_types = {
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+        }
+
+        if content_type not in allowed_content_types:
+            send_json(415, {
+                "success": False,
+                "error": "Only JPEG, PNG, and WebP images are accepted."
+            })
+            return
+
+        try:
+            content_length = int(
+                self.headers.get("Content-Length", "0")
+            )
+        except ValueError:
+            content_length = 0
+
+        MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
+        if content_length <= 0 or content_length > MAX_IMAGE_BYTES:
+            send_json(413, {
+                "success": False,
+                "error": "Invalid image size. Maximum is 10 MB."
+            })
+            return
+
+        try:
+            image_bytes = self.rfile.read(content_length)
+
+            if len(image_bytes) != content_length:
+                send_json(400, {
+                    "success": False,
+                    "error": "Incomplete image upload."
+                })
+                return
+
+            image_array = np.frombuffer(
+                image_bytes,
+                dtype=np.uint8
+            )
+
+            frame = cv2.imdecode(
+                image_array,
+                cv2.IMREAD_COLOR
+            )
+
+            if frame is None:
+                send_json(400, {
+                    "success": False,
+                    "error": "Unable to decode the uploaded image."
+                })
+                return
+
+            # Serialize uploaded-image inference with live-camera
+            # inference so the shared GPU models are never used
+            # simultaneously by competing requests.
+            with AI_INFERENCE_LOCK:
+
+                vehicle_model = AI_MODELS["vehicle"]
+                accident_model = AI_MODELS["accident"]
+
+                if vehicle_model is None or accident_model is None:
+                    send_json(503, {
+                        "success": False,
+                        "error": "Vehicle or accident model is unavailable."
+                    })
+                    return
+
+                vehicle_results = vehicle_model(
+                    frame,
+                    imgsz=IMG_SIZE,
+                    conf=VEHICLE_CONFIDENCE,
+                    device=0,
+                    verbose=False,
+                )
+
+                accident_results = accident_model(
+                    frame,
+                    imgsz=IMG_SIZE,
+                    conf=ACCIDENT_CONFIDENCE,
+                    device=0,
+                    verbose=False,
+                )
+
+                # Annotate the image with vehicle detections.
+                annotated_image = vehicle_results[0].plot()
+
+                vehicle_breakdown = {
+                    "car": 0,
+                    "truck": 0,
+                    "bus": 0,
+                    "motorcycle": 0,
+                    "person": 0,
+                }
+
+                vehicle_count = 0
+                vehicle_names = vehicle_model.names
+
+                for result in vehicle_results:
+                    if result.boxes is None:
+                        continue
+
+                    for box in result.boxes:
+                        class_id = int(box.cls[0])
+
+                        if isinstance(vehicle_names, dict):
+                            class_name = vehicle_names.get(
+                                class_id, ""
+                            )
+                        else:
+                            class_name = (
+                                vehicle_names[class_id]
+                                if class_id < len(vehicle_names)
+                                else ""
+                            )
+
+                        class_name = str(class_name).strip().lower()
+
+                        if class_name in vehicle_breakdown:
+                            vehicle_breakdown[class_name] += 1
+
+                            if class_name != "person":
+                                vehicle_count += 1
+
+                # Calculate traffic density.
+                if vehicle_count <= 10:
+                    traffic_density = "LOW"
+                elif vehicle_count <= 25:
+                    traffic_density = "MEDIUM"
+                else:
+                    traffic_density = "HIGH"
+
+                # Accident detection.
+                accident_detected = False
+                accident_confidence = 0.0
+
+                for result in accident_results:
+                    if result.boxes is None:
+                        continue
+
+                    for box in result.boxes:
+                        class_id = int(box.cls[0])
+
+                        accident_names = accident_model.names
+
+                        if isinstance(accident_names, dict):
+                            class_name = accident_names.get(
+                                class_id, ""
+                            )
+                        else:
+                            class_name = (
+                                accident_names[class_id]
+                                if class_id < len(accident_names)
+                                else ""
+                            )
+
+                        if str(class_name).strip().lower() == "accident":
+                            accident_detected = True
+                            accident_confidence = max(
+                                accident_confidence,
+                                float(box.conf[0]) * 100
+                            )
+
+                accident_confidence = round(
+                    accident_confidence, 2
+                )
+
+                if accident_detected:
+                    if accident_confidence >= 90:
+                        severity = "HIGH"
+                    elif accident_confidence >= 70:
+                        severity = "MEDIUM"
+                    else:
+                        severity = "LOW"
+                else:
+                    severity = "NONE"
+
+                # Recommendations.
+                if accident_detected:
+                    recommendations = [
+                        "Dispatch Ambulance",
+                        "Alert Police",
+                        "Create Green Corridor",
+                    ]
+                elif traffic_density == "HIGH":
+                    recommendations = [
+                        "Increase Green Signal Time",
+                        "Deploy Traffic Officers",
+                    ]
+                elif traffic_density == "MEDIUM":
+                    recommendations = [
+                        "Monitor Traffic",
+                    ]
+                else:
+                    recommendations = [
+                        "Traffic Flow Normal",
+                    ]
+
+                success, encoded_image = cv2.imencode(
+                    ".jpg",
+                    annotated_image,
+                    [
+                        cv2.IMWRITE_JPEG_QUALITY,
+                        90,
+                    ],
+                )
+
+                if not success:
+                    raise RuntimeError(
+                        "Could not encode the annotated image."
+                    )
+
+            # Return the annotated image as a data URL.
+            # This avoids exposing the laptop's local filesystem path.
+            image_base64 = base64.b64encode(
+                encoded_image.tobytes()
+            ).decode("ascii")
+
+            image_data_url = (
+                "data:image/jpeg;base64,"
+                + image_base64
+            )
+
+            send_json(200, {
+                "success": True,
+
+                "vehicleCount": vehicle_count,
+                "vehicleBreakdown": vehicle_breakdown,
+
+                "trafficDensity": traffic_density,
+                "congestion": traffic_density,
+
+                "accident": {
+                    "detected": accident_detected,
+                    "confidence": accident_confidence,
+                    "severity": severity,
+                },
+
+                # Compatibility with the existing React frontend.
+                "accidentDetected": accident_detected,
+                "accidentSeverity": severity,
+
+                "recommendations": recommendations,
+                "recommendation": recommendations[0],
+
+                # The existing UI can use this as an image source.
+                "jpg": image_data_url,
+                "annotatedImage": image_data_url,
+                "annotatedImageMimeType": "image/jpeg",
+            })
+
+        except Exception as error:
+            print(
+                f"Uploaded-image inference error: {error}",
+                flush=True,
+            )
+
+            send_json(500, {
+                "success": False,
+                "error": "Uploaded-image inference failed.",
+            })
 
     def do_GET(self):
 
@@ -3375,6 +3768,201 @@ def cache_vehicle_results(
     )
 
 
+VEHICLE_TRACK_CLASSES = {
+    "bicycle",
+    "car",
+    "motorcycle",
+    "bus",
+    "truck",
+}
+VEHICLE_TRACK_MAX_FEATURES = 24
+VEHICLE_TRACK_REFRESH_EVERY = 6
+VEHICLE_TRACK_MIN_POINTS = 3
+
+
+def _vehicle_box_features(gray_frame, box, max_corners=VEHICLE_TRACK_MAX_FEATURES):
+    """Find image features inside a vehicle box for lightweight optical flow."""
+    height, width = gray_frame.shape[:2]
+    x1, y1, x2, y2 = [int(round(value)) for value in box]
+    x1 = max(0, min(width - 1, x1))
+    y1 = max(0, min(height - 1, y1))
+    x2 = max(x1 + 1, min(width, x2))
+    y2 = max(y1 + 1, min(height, y2))
+
+    roi = gray_frame[y1:y2, x1:x2]
+    if roi.size == 0 or roi.shape[0] < 5 or roi.shape[1] < 5:
+        return np.empty((0, 1, 2), dtype=np.float32)
+
+    points = cv2.goodFeaturesToTrack(
+        roi,
+        maxCorners=max_corners,
+        qualityLevel=0.01,
+        minDistance=4,
+        blockSize=3,
+    )
+    if points is None or len(points) == 0:
+        return np.empty((0, 1, 2), dtype=np.float32)
+
+    points = points.astype(np.float32)
+    points[:, 0, 0] += x1
+    points[:, 0, 1] += y1
+    return points
+
+
+def refresh_vehicle_tracks(camera, frame, vehicle_results, vehicle_model):
+    """Reset per-camera motion tracks from the newest YOLO vehicle detections."""
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    frame_height, frame_width = gray.shape[:2]
+    names = vehicle_model.names
+    tracks = []
+    now = time.monotonic()
+
+    for result in vehicle_results:
+        if result.boxes is None or len(result.boxes) == 0:
+            continue
+
+        for detection in result.boxes:
+            class_id = int(detection.cls[0])
+            if isinstance(names, dict):
+                class_name = str(names.get(class_id, class_id)).lower()
+            else:
+                class_name = str(names[class_id]).lower()
+
+            if class_name not in VEHICLE_TRACK_CLASSES:
+                continue
+
+            coordinates = detection.xyxy[0].detach().cpu().numpy().astype(np.float32)
+            x1, y1, x2, y2 = coordinates.tolist()
+            x1 = max(0.0, min(float(frame_width - 1), x1))
+            y1 = max(0.0, min(float(frame_height - 1), y1))
+            x2 = max(x1 + 2.0, min(float(frame_width), x2))
+            y2 = max(y1 + 2.0, min(float(frame_height), y2))
+            box = np.array([x1, y1, x2, y2], dtype=np.float32)
+            points = _vehicle_box_features(gray, box)
+
+            if len(points) < VEHICLE_TRACK_MIN_POINTS:
+                # Skip boxes without enough visual features to follow safely.
+                continue
+
+            tracks.append({
+                "box": box,
+                "points": points,
+                "class_name": class_name,
+                "confidence": float(detection.conf[0]),
+            })
+
+    camera.vehicle_tracks = tracks
+    camera.vehicle_previous_gray = gray
+    camera.vehicle_track_frame_count = 0
+    camera.vehicle_tracks_last_detection = now
+
+
+def advance_vehicle_tracks(camera, frame):
+    """Move cached YOLO boxes with sparse optical flow between detections."""
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    previous_gray = camera.vehicle_previous_gray
+    camera.vehicle_track_frame_count += 1
+
+    if previous_gray is None:
+        camera.vehicle_previous_gray = gray
+        return
+
+    now = time.monotonic()
+    max_track_age = max(1.5, min(5.0, float(camera.inference_interval) * 1.75))
+    height, width = gray.shape[:2]
+    updated_tracks = []
+
+    for track in camera.vehicle_tracks or []:
+        if now - camera.vehicle_tracks_last_detection > max_track_age:
+            continue
+
+        previous_points = track.get("points")
+        if previous_points is None or len(previous_points) < VEHICLE_TRACK_MIN_POINTS:
+            continue
+
+        next_points, status, _ = cv2.calcOpticalFlowPyrLK(
+            previous_gray,
+            gray,
+            previous_points,
+            None,
+            winSize=(21, 21),
+            maxLevel=2,
+            criteria=(
+                cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
+                20,
+                0.03,
+            ),
+        )
+
+        if next_points is None or status is None:
+            continue
+
+        mask = status.reshape(-1).astype(bool)
+        old_xy = previous_points.reshape(-1, 2)[mask]
+        new_xy = next_points.reshape(-1, 2)[mask]
+        if len(new_xy) < VEHICLE_TRACK_MIN_POINTS:
+            continue
+
+        displacement = new_xy - old_xy
+        median_shift = np.median(displacement, axis=0)
+        residual = np.linalg.norm(displacement - median_shift, axis=1)
+        residual_limit = max(4.0, float(np.median(residual)) * 2.5)
+        inliers = residual <= residual_limit
+        if int(np.count_nonzero(inliers)) < VEHICLE_TRACK_MIN_POINTS:
+            continue
+
+        dx, dy = np.median(displacement[inliers], axis=0).tolist()
+        if not np.isfinite(dx) or not np.isfinite(dy) or (dx * dx + dy * dy) > 120.0 ** 2:
+            continue
+
+        box = track["box"].astype(np.float32).copy()
+        box += np.array([dx, dy, dx, dy], dtype=np.float32)
+        box[0] = max(0.0, min(float(width - 1), box[0]))
+        box[1] = max(0.0, min(float(height - 1), box[1]))
+        box[2] = max(box[0] + 2.0, min(float(width), box[2]))
+        box[3] = max(box[1] + 2.0, min(float(height), box[3]))
+
+        track["box"] = box
+        track["points"] = new_xy[inliers].astype(np.float32).reshape(-1, 1, 2)
+
+        # Re-seed features periodically so the optical-flow points do not
+        # disappear as vehicles move or become partially occluded.
+        if camera.vehicle_track_frame_count % VEHICLE_TRACK_REFRESH_EVERY == 0:
+            refreshed = _vehicle_box_features(gray, box)
+            if len(refreshed) >= VEHICLE_TRACK_MIN_POINTS:
+                track["points"] = refreshed
+
+        updated_tracks.append(track)
+
+    camera.vehicle_tracks = updated_tracks
+    camera.vehicle_previous_gray = gray
+
+
+def draw_vehicle_tracks(frame, camera):
+    """Draw the latest tracked vehicle boxes on every outgoing YOLO frame."""
+    for track in camera.vehicle_tracks or []:
+        x1, y1, x2, y2 = [int(round(value)) for value in track["box"]]
+        if x2 <= x1 or y2 <= y1:
+            continue
+
+        color = (40, 220, 80)
+        label = (
+            f"{track['class_name'].upper()} "
+            f"{track['confidence'] * 100:.0f}%"
+        )
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        cv2.putText(
+            frame,
+            label,
+            (x1, max(18, y1 - 7)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            color,
+            2,
+            cv2.LINE_AA,
+        )
+
+
 # =========================================================
 # MAIN
 # =========================================================
@@ -3440,6 +4028,15 @@ def main():
         emergency_model.names
     )
 
+    # Register the existing model instances for shared inference.
+    AI_MODELS["vehicle"] = vehicle_model
+    AI_MODELS["accident"] = accident_model
+    AI_MODELS["emergency"] = emergency_model
+
+    # Signal that all models are ready.
+    AI_MODELS_READY.set()
+
+    print("✅ Shared YOLO model registry is ready.")
 
     # =====================================================
     # Start local stream server before fetching camera config.
@@ -3447,6 +4044,40 @@ def main():
     # =====================================================
 
     stream_server = start_stream_server()
+
+        # =====================================================
+    # IMAGE-ONLY MODE
+    # Load YOLO models without opening live cameras.
+    # =====================================================
+
+    image_only_mode = (
+        os.getenv(
+            "TRAFFIC_IMAGE_ONLY_MODE",
+            "false",
+        ).strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
+
+    if image_only_mode:
+        print("✅ TrafficMind Image-Only Mode started.")
+        print("✅ YOLO models are ready for uploaded-image analysis.")
+        print("✅ Live cameras are not being initialized.")
+
+        try:
+            while True:
+                time.sleep(0.5)
+
+        except KeyboardInterrupt:
+            print("Image-Only Mode stopping.")
+
+        finally:
+            AI_MODELS_READY.clear()
+            stream_server.shutdown()
+            stream_server.server_close()
+
+            print("Image-Only Mode stopped.")
+
+        return
 
 
     # =====================================================
@@ -3584,11 +4215,14 @@ def main():
     )
 
     print(
-        "   Vehicle AI intervals: "
+        "   Vehicle AI intervals (effective): "
         f"Emergency={PHASE27_EMERGENCY_INTERVAL:.2f}s | "
         f"HighRisk={PHASE27_HIGH_RISK_INTERVAL:.2f}s | "
         f"HighCongestion={PHASE27_HIGH_CONGESTION_INTERVAL:.2f}s | "
         f"Normal={PHASE27_NORMAL_INTERVAL:.2f}s"
+    )
+    print(
+        "   Vehicle stream overlay: optical-flow tracking between YOLO inferences"
     )
 
 
@@ -3789,14 +4423,16 @@ def main():
 
                 if should_run_vehicle_ai:
                     try:
-                        vehicle_results = (
-                            vehicle_model(
-                                frame,
-                                imgsz=IMG_SIZE,
-                                conf=VEHICLE_CONFIDENCE,
-                                verbose=False,
+                        with AI_INFERENCE_LOCK:
+                            vehicle_results = (
+                                vehicle_model(
+                                    frame,
+                                    imgsz=IMG_SIZE,
+                                    conf=VEHICLE_CONFIDENCE,
+                                    device=0,
+                                    verbose=False,
+                                )
                             )
-                        )
 
                         (
                             vehicle_count,
@@ -3883,14 +4519,16 @@ def main():
 
                     try:
 
-                        accident_results = (
-                            accident_model(
-                                frame,
-                                imgsz=IMG_SIZE,
-                                conf=ACCIDENT_CONFIDENCE,
-                                verbose=False,
+                        with AI_INFERENCE_LOCK:
+                            accident_results = (
+                                accident_model(
+                                    frame,
+                                    imgsz=IMG_SIZE,
+                                    conf=ACCIDENT_CONFIDENCE,
+                                    device=0,
+                                    verbose=False,
+                                )
                             )
-                        )
 
                         # =================================================
                         # ACCIDENT DEBUG
@@ -4102,96 +4740,120 @@ def main():
 
                     try:
 
-                        emergency_results = (
-                            emergency_model(
+                        with AI_INFERENCE_LOCK:
+                            emergency_results = emergency_model(
                                 frame,
                                 imgsz=IMG_SIZE,
                                 conf=EMERGENCY_CONFIDENCE,
+                                device=0,
                                 verbose=False,
                             )
-                        )
 
-                        camera.last_emergency_analysis = (
-                            processing_now
-                        )
+                        # Commit a fresh result only after inference and result
+                        # parsing complete. This avoids clearing valid cached
+                        # state if an unexpected result-format error occurs.
+                        detected_boxes = []
+                        best_emergency_type = ""
+                        best_emergency_confidence = 0.0
+                        best_emergency_bbox = None
 
-                        camera.emergency_detected = False
-                        camera.emergency_vehicle_type = ""
-                        camera.emergency_confidence = 0.0
-                        camera.emergency_boxes = []
-                        camera.emergency_signature = []
+                        frame_height, frame_width = frame.shape[:2]
 
                         for result in emergency_results:
 
-                            for box in result.boxes:
+                            boxes = getattr(result, "boxes", None)
+                            if boxes is None:
+                                continue
 
-                                cls_id = int(
-                                    box.cls[0]
-                                )
+                            class_names = getattr(result, "names", None)
+                            if class_names is None:
+                                class_names = emergency_model.names
 
-                                class_name = (
-                                    emergency_model.names[
-                                        cls_id
-                                    ]
-                                )
+                            for box in boxes:
 
-                                confidence = float(
-                                    box.conf[0]
-                                )
+                                if box.cls is None or box.conf is None:
+                                    continue
 
-                                emergency_type = (
-                                    normalize_emergency_type(
-                                        class_name
-                                    )
-                                )
+                                cls_id = int(box.cls[0].item())
+                                confidence = float(box.conf[0].item())
 
-                                if (
-                                    emergency_type
-                                    and confidence
-                                    >= EMERGENCY_CONFIDENCE
+                                if not np.isfinite(confidence):
+                                    continue
+
+                                if confidence < EMERGENCY_CONFIDENCE:
+                                    continue
+
+                                # Ultralytics may expose names as a dict or list.
+                                if isinstance(class_names, dict):
+                                    class_name = class_names.get(cls_id, "")
+                                elif (
+                                    isinstance(class_names, (list, tuple))
+                                    and 0 <= cls_id < len(class_names)
                                 ):
+                                    class_name = class_names[cls_id]
+                                else:
+                                    continue
 
-                                    camera.emergency_detected = True
+                                emergency_type = normalize_emergency_type(
+                                    class_name
+                                )
 
-                                    if (
-                                        confidence
-                                        >= camera.emergency_confidence
-                                    ):
-                                        camera.emergency_vehicle_type = (
-                                            emergency_type
-                                        )
+                                # Ignore generic "Vehicle" and unknown classes.
+                                if emergency_type is None:
+                                    continue
 
-                                        camera.emergency_confidence = (
-                                            confidence
-                                        )
+                                if box.xyxy is None:
+                                    continue
 
-                                        camera.emergency_signature = (
-                                            build_emergency_signature(
-                                                frame,
-                                                tuple(
-                                                    map(
-                                                        int,
-                                                        box.xyxy[0],
-                                                    )
-                                                ),
-                                            )
-                                        )
+                                coordinates = box.xyxy[0].tolist()
+                                if len(coordinates) != 4:
+                                    continue
 
-                                    x1, y1, x2, y2 = map(
-                                        int,
-                                        box.xyxy[0],
+                                if not np.all(np.isfinite(coordinates)):
+                                    continue
+
+                                x1, y1, x2, y2 = map(int, coordinates)
+
+                                # Clamp coordinates to the source frame.
+                                x1 = max(0, min(frame_width - 1, x1))
+                                y1 = max(0, min(frame_height - 1, y1))
+                                x2 = max(0, min(frame_width, x2))
+                                y2 = max(0, min(frame_height, y2))
+
+                                if x2 <= x1 or y2 <= y1:
+                                    continue
+
+                                detected_boxes.append(
+                                    (
+                                        x1,
+                                        y1,
+                                        x2,
+                                        y2,
+                                        confidence,
+                                        emergency_type,
                                     )
+                                )
 
-                                    camera.emergency_boxes.append(
-                                        (
-                                            x1,
-                                            y1,
-                                            x2,
-                                            y2,
-                                            confidence,
-                                            emergency_type,
-                                        )
-                                    )
+                                if confidence > best_emergency_confidence:
+                                    best_emergency_type = emergency_type
+                                    best_emergency_confidence = confidence
+                                    best_emergency_bbox = (x1, y1, x2, y2)
+
+                        # Successful inference: replace the cached state,
+                        # including clearing it when no emergency is detected.
+                        camera.last_emergency_analysis = processing_now
+                        camera.emergency_boxes = detected_boxes
+                        camera.emergency_detected = bool(detected_boxes)
+                        camera.emergency_vehicle_type = best_emergency_type
+                        camera.emergency_confidence = best_emergency_confidence
+                        camera.emergency_signature = (
+                            build_emergency_signature(
+                                frame,
+                                best_emergency_bbox,
+                            )
+                            if best_emergency_bbox is not None
+                            else []
+                        )
 
                     except Exception as error:
 
@@ -4242,13 +4904,24 @@ def main():
                     frame.copy()
                 )
 
-                # Fresh YOLO results are plotted only on the frame
-                # where inference actually ran. Between inferences
-                # the browser receives the newest source frame,
-                # keeping motion smooth without stale box positions.
+                # Refresh optical-flow tracks after a new YOLO inference;
+                # otherwise move existing boxes with the current video frame.
+                # This keeps annotations visible between inference cycles without
+                # leaving boxes frozen at their old positions.
                 if fresh_vehicle_inference:
-                    for result in vehicle_results:
-                        annotated_frame = result.plot()
+                    refresh_vehicle_tracks(
+                        camera,
+                        frame,
+                        vehicle_results,
+                        vehicle_model,
+                    )
+                else:
+                    advance_vehicle_tracks(camera, frame)
+
+                draw_vehicle_tracks(
+                    annotated_frame,
+                    camera,
+                )
 
 
                 # -----------------------------------------

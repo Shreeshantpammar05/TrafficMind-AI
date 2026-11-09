@@ -9,6 +9,13 @@ const {
   requireCameraAccess,
 } = require("../middleware/authMiddleware");
 
+const {
+  claimNextImageJob,
+  completeImageJobResult,
+  completeImageJobImage,
+  failImageJob,
+} = require("../services/imageInferenceQueue");
+
 const router = express.Router();
 
 const SESSION_LIMIT_MINUTES = 40;
@@ -411,5 +418,109 @@ router.isDemoSessionActive = () => {
   // just before the Edge Agent received the stop command.
   return session.active || Date.now() < session.demoLabelUntil;
 };
+
+// ============================================
+// EDGE AGENT — UPLOADED IMAGE INFERENCE JOBS
+// ============================================
+
+// Deliver the next queued image to the authenticated Edge Agent.
+router.get("/edge/image-jobs/next", requireEdge, (req, res) => {
+  try {
+    const job = claimNextImageJob();
+
+    if (!job) {
+      return res.status(204).end();
+    }
+
+    return res
+      .status(200)
+      .set("X-Image-Job-Id", job.jobId)
+      .set("X-Image-Original-Name", encodeURIComponent(job.originalName))
+      .type(job.contentType)
+      .send(job.imageBuffer);
+  } catch (error) {
+    console.error("Image job retrieval error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Could not retrieve image job.",
+    });
+  }
+});
+
+// Receive the detection metadata from the laptop GPU.
+router.post(
+  "/edge/image-jobs/:jobId/result",
+  requireEdge,
+  (req, res) => {
+    try {
+      const accepted = completeImageJobResult(
+        req.params.jobId,
+        req.body
+      );
+
+      if (!accepted) {
+        return res.status(409).json({
+          success: false,
+          message: "Image job is no longer processing.",
+        });
+      }
+
+      return res.json({ success: true });
+    } catch (error) {
+      console.error("Image result error:", error);
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+);
+
+// Receive the annotated JPEG separately from the JSON metadata.
+router.post(
+  "/edge/image-jobs/:jobId/image",
+  requireEdge,
+  express.raw({
+    type: "image/jpeg",
+    limit: "10mb",
+  }),
+  (req, res) => {
+    try {
+      const accepted = completeImageJobImage(
+        req.params.jobId,
+        req.body
+      );
+
+      if (!accepted) {
+        return res.status(409).json({
+          success: false,
+          message: "Image job is no longer processing.",
+        });
+      }
+
+      return res.json({ success: true });
+    } catch (error) {
+      console.error("Annotated image error:", error);
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+);
+
+// Mark a job as failed when GPU inference cannot complete.
+router.post(
+  "/edge/image-jobs/:jobId/fail",
+  requireEdge,
+  (req, res) => {
+    const accepted = failImageJob(
+      req.params.jobId,
+      req.body?.error
+    );
+
+    return res.json({ success: accepted });
+  }
+);
 
 module.exports = router;

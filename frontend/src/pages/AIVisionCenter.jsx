@@ -1,8 +1,9 @@
+
 import { API_BASE as BASE_URL } from "../config/api.js";
 import BackButton from "../components/BackButton";
 import MainLayout from "../layouts/MainLayout";
+import DemoModePanel from '../components/DemoModePanel';
 
-import jsPDF from "jspdf";
 import axios from "axios";
 
 import {
@@ -10,15 +11,6 @@ import {
   useState,
 } from "react";
 
-
-
-const YOLO_STREAM_BASE =
-  import.meta.env.VITE_YOLO_STREAM_BASE_URL ||
-  "http://localhost:5050";
-
-const USER_ROLE =
-  localStorage.getItem("role") ||
-  "citizen";
 
 function normalizeCamera(camera) {
   if (!camera) return null;
@@ -57,26 +49,13 @@ function normalizeCamera(camera) {
 const ONLINE_THRESHOLD = 15;
 const STALE_THRESHOLD = 30;
 
+// The legacy MJPEG server is bound to loopback only. Use it directly only
+// when this page is running on the same machine in Vite development mode.
+const LOCAL_STREAM_BASE = "http://127.0.0.1:5050";
 function AIVisionCenter() {
-  // =====================================================
-  // Existing AI Analysis State
-  // =====================================================
-
-  const [result, setResult] =
-    useState(null);
-
-  const [imageUrl, setImageUrl] =
-    useState("");
-
-  const [selectedFile, setSelectedFile] =
-    useState(null);
-
-  const [fileType, setFileType] =
-    useState("image");
-
-  const [loading, setLoading] =
-    useState(false);
-
+    const USER_ROLE = (
+    localStorage.getItem("role") || "citizen"
+  ).toLowerCase();
   // =====================================================
   // Camera State
   // =====================================================
@@ -89,6 +68,16 @@ function AIVisionCenter() {
 
   const [cameraStatus, setCameraStatus] =
     useState({});
+
+  const [demoMonitoringActive, setDemoMonitoringActive] = useState(false);
+  const [demoStreamTicket, setDemoStreamTicket] = useState('');
+  const [localStreamReady, setLocalStreamReady] = useState(false);
+
+  // Never use the unauthenticated loopback stream from a hosted dashboard.
+  const isLocalDashboard =
+    import.meta.env.DEV &&
+    typeof window !== "undefined" &&
+    ["localhost", "127.0.0.1"].includes(window.location.hostname);
 
   const [cameras, setCameras] =
     useState([]);
@@ -431,11 +420,15 @@ function AIVisionCenter() {
 
     return () =>
       clearInterval(interval);
-  }, [cameras, cameraLoading]);
+  }, [cameras, cameraLoading, demoMonitoringActive]);
 
   const getHealthStatus = (
     timestamp
   ) => {
+    if (!demoMonitoringActive) {
+      return { status: "OFFLINE", label: "AI OFFLINE", color: "#EF4444", background: "rgba(239,68,68,.10)", icon: "🔴" };
+    }
+
     if (!timestamp) {
       return {
         status: "OFFLINE",
@@ -646,220 +639,68 @@ function AIVisionCenter() {
         ]
       : null;
 
-  // =====================================================
-  // AI Traffic Analysis
-  // =====================================================
+  // In local development, wait for the Edge Agent to start the loopback
+  // MJPEG server before attaching the browser to its streams. This avoids
+  // an early 404 when Activate is clicked and the runner is still starting.
+  useEffect(() => {
+    if (!isLocalDashboard || !demoMonitoringActive) {
+      setLocalStreamReady(false);
+      return undefined;
+    }
 
-  const analyzeTraffic =
-    async () => {
+    let cancelled = false;
+    let retryTimer = null;
+
+    const checkLocalStream = async () => {
       try {
-        if (!selectedFile) {
-          alert(
-            "Please select an image or video."
-          );
+        const response = await fetch(`${LOCAL_STREAM_BASE}/health`, {
+          cache: "no-store",
+        });
 
-          return;
+        if (!response.ok) {
+          throw new Error(`Local stream health returned ${response.status}`);
         }
 
-        setLoading(true);
-
-        const formData =
-          new FormData();
-
-        formData.append(
-          "image",
-          selectedFile
-        );
-
-        const uploadRes =
-          await axios.post(
-            `${BASE_URL}/api/upload/image`,
-            formData,
-            {
-              headers:
-                getAuthHeaders(),
-            }
-          );
-
-        const imagePath =
-          uploadRes.data.imagePath;
-
-        let analysisResponse;
-
-        if (
-          fileType ===
-          "video"
-        ) {
-          analysisResponse =
-            await axios.get(
-              `${BASE_URL}/api/video/analyze-video`,
-              {
-                headers:
-                  getAuthHeaders(),
-              }
-            );
-        } else {
-          analysisResponse =
-            await axios.get(
-              `${BASE_URL}/api/ai/analyze`,
-              {
-                headers:
-                  getAuthHeaders(),
-                params: {
-                  imagePath,
-                },
-              }
-            );
+        if (!cancelled) {
+          setLocalStreamReady(true);
         }
-
-        const analysis =
-          analysisResponse.data;
-
-        setResult(
-          analysis
-        );
-
-        if (
-          analysis.accidentDetected
-        ) {
-          try {
-            await axios.post(
-              `${BASE_URL}/api/incidents`,
-              {
-                location:
-                  "AI Surveillance",
-                incidentType:
-                  "Accident",
-                severity:
-                  analysis.accidentSeverity,
-                description:
-                  "AI detected a possible road accident.",
-              },
-              {
-                headers:
-                  getAuthHeaders(),
-              }
-            );
-
-            alert(
-              "🚨 Accident Detected!\n\nEmergency incident has been created successfully."
-            );
-          } catch (error) {
-            console.log(
-              "Incident creation error:",
-              error
-            );
-          }
-        }
-
-        const resultImage =
-          `${BASE_URL}/results/annotated_result.jpg?t=${Date.now()}`;
-
-        setImageUrl(
-          resultImage
-        );
-
-        alert(
-          "AI Analysis Success"
-        );
       } catch (error) {
-        console.log(
-          "AI analysis error:",
-          error
-        );
-
-        alert(
-          error.response?.data?.error ||
-            error.message ||
-            "AI Analysis Failed"
-        );
-      } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLocalStreamReady(false);
+          retryTimer = window.setTimeout(checkLocalStream, 1000);
+        }
       }
     };
 
-  // =====================================================
-  // PDF Report
-  // =====================================================
+    setLocalStreamReady(false);
+    checkLocalStream();
 
-  const downloadReport =
-    () => {
-      if (!result) {
-        alert(
-          "Run analysis first."
-        );
-
-        return;
+    return () => {
+      cancelled = true;
+      if (retryTimer !== null) {
+        window.clearTimeout(retryTimer);
       }
-
-      const doc =
-        new jsPDF();
-
-      doc.setFontSize(
-        18
-      );
-
-      doc.text(
-        "TrafficMind AI Report",
-        20,
-        20
-      );
-
-      doc.setFontSize(
-        12
-      );
-
-      doc.text(
-        `Vehicle Count: ${
-          result.vehicleCount ||
-          result.averageVehicleCount ||
-          0
-        }`,
-        20,
-        50
-      );
-
-      doc.text(
-        `Congestion: ${
-          result.congestion ||
-          "Unknown"
-        }`,
-        20,
-        70
-      );
-
-      doc.text(
-        `Recommendation: ${
-          result.recommendation ||
-          "Monitor Traffic"
-        }`,
-        20,
-        90
-      );
-
-      if (
-        result.accidentDetected
-      ) {
-        doc.text(
-          `Accident Severity: ${
-            result.accidentSeverity ||
-            "Unknown"
-          }`,
-          20,
-          110
-        );
-      }
-
-      doc.text(
-        `Generated: ${new Date().toLocaleString()}`,
-        20,
-        130
-      );
-
-      doc.save(
-        "TrafficMind_AI_Report.pdf"
-      );
     };
+  }, [demoMonitoringActive, isLocalDashboard]);
+
+  const selectedYoloStreamUrl = !demoMonitoringActive
+    ? undefined
+    : isLocalDashboard
+      ? localStreamReady && selectedCamera
+        ? `${LOCAL_STREAM_BASE}/stream/${encodeURIComponent(selectedCamera.id)}`
+        : undefined
+      : demoStreamTicket && selectedCamera
+        ? `${BASE_URL}/api/demo-control/stream/${encodeURIComponent(selectedCamera.id)}?ticket=${encodeURIComponent(demoStreamTicket)}`
+        : undefined;
+
+  const selectedNormalStreamUrl =
+    isLocalDashboard &&
+    demoMonitoringActive &&
+    localStreamReady &&
+    selectedCamera &&
+    String(selectedCamera.source || "").trim().toLowerCase().startsWith("rtsp://")
+      ? `${LOCAL_STREAM_BASE}/normal-stream/${encodeURIComponent(selectedCamera.id)}`
+      : undefined;
 
   // =====================================================
   // Camera Counts
@@ -1071,54 +912,76 @@ function AIVisionCenter() {
               "#05070b",
           }}
         >
-          {String(camera.source || "")
-            .trim()
-            .toLowerCase()
-            .startsWith("rtsp://") ? (
-            <img
-              src={`${YOLO_STREAM_BASE}/normal-stream/${camera.id}`}
-              alt={`Live original camera feed for ${camera.id}`}
+          {isMinimized ? (
+            <div
               style={{
-                display:
-                  "block",
-                width:
-                  "100%",
-                height:
-                  isMinimized ? "92px" : "280px",
-                objectFit:
-                  "cover",
-                background:
-                  "#000",
+                display: "grid",
+                placeItems: "center",
+                height: "92px",
+                padding: "10px",
+                boxSizing: "border-box",
+                color: "var(--text-muted)",
+                textAlign: "center",
+                fontSize: "11px",
+                background: "#05070b",
               }}
-            />
+            >
+              Camera preview paused while viewing the selected analysis.
+            </div>
+          ) : String(camera.source || "")
+              .trim()
+              .toLowerCase()
+              .startsWith("rtsp://") ? (
+            isLocalDashboard && demoMonitoringActive && localStreamReady ? (
+              <img
+                key={`normal-${camera.id}`}
+                src={`${LOCAL_STREAM_BASE}/normal-stream/${encodeURIComponent(camera.id)}`}
+                alt={`Original live camera feed for ${camera.id}`}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  height: "280px",
+                  objectFit: "cover",
+                  background: "#000",
+                }}
+              />
+            ) : (
+              <div
+                style={{
+                  display: "grid",
+                  placeItems: "center",
+                  height: "280px",
+                  padding: "12px",
+                  boxSizing: "border-box",
+                  color: "var(--text-muted)",
+                  textAlign: "center",
+                  fontSize: "12px",
+                  background: "#05070b",
+                }}
+              >
+                RTSP camera connected through the Edge Agent. Open View Analysis to see its live feed.
+              </div>
+            )
           ) : (
             <video
               width="100%"
-              height={isMinimized ? "92" : "280"}
+              height="280"
               autoPlay
               muted
               loop
               playsInline
-              controls={
-                false
-              }
+              preload="metadata"
+              controls={false}
               style={{
-                display:
-                  "block",
-                width:
-                  "100%",
-                height:
-                  "280px",
-                objectFit:
-                  "cover",
-                background:
-                  "#000",
+                display: "block",
+                width: "100%",
+                height: "280px",
+                objectFit: "cover",
+                background: "#000",
               }}
             >
               <source
-                src={
-                  camera.video
-                }
+                src={camera.video}
                 type="video/mp4"
               />
             </video>
@@ -1146,7 +1009,7 @@ function AIVisionCenter() {
                 "700",
             }}
           >
-            ● ORIGINAL LIVE CAMERA
+            ● EDGE CAMERA FEED
           </div>
         </div>
 
@@ -1380,6 +1243,14 @@ function AIVisionCenter() {
               ➕ Add Camera
             </button>
           )}
+
+          <DemoModePanel
+            cameras={cameras}
+            onSessionChange={(active, ticket) => {
+              setDemoMonitoringActive(active);
+              setDemoStreamTicket(ticket || "");
+            }}
+          />
 
           
         </div>
@@ -2118,7 +1989,7 @@ function AIVisionCenter() {
                     >
                       <div>
                         <strong>
-                          🎥 Normal Live Camera
+                          🎥 Edge Camera Feed
                         </strong>
 
                         <div
@@ -2143,13 +2014,11 @@ function AIVisionCenter() {
                       </span>
                     </div>
 
-                    {String(selectedCamera.source || "")
-                      .trim()
-                      .toLowerCase()
-                      .startsWith("rtsp://") ? (
+                    {selectedNormalStreamUrl ? (
                       <img
-                        src={`${YOLO_STREAM_BASE}/normal-stream/${selectedCamera.id}`}
-                        alt={`Normal live camera for ${selectedCamera.id}`}
+                        key={`selected-normal-${selectedCamera.id}`}
+                        src={selectedNormalStreamUrl}
+                        alt={`Original live camera feed for ${selectedCamera.id}`}
                         style={{
                           display: "block",
                           width: "100%",
@@ -2158,6 +2027,26 @@ function AIVisionCenter() {
                           background: "#000",
                         }}
                       />
+                    ) : String(selectedCamera.source || "")
+                      .trim()
+                      .toLowerCase()
+                      .startsWith("rtsp://") ? (
+                      <div
+                        style={{
+                          display: "grid",
+                          placeItems: "center",
+                          height: isMobile ? "280px" : "430px",
+                          padding: "16px",
+                          boxSizing: "border-box",
+                          color: "var(--text-muted)",
+                          textAlign: "center",
+                          background: "#000",
+                        }}
+                      >
+                        {isLocalDashboard && demoMonitoringActive
+                          ? "Connecting to the local Edge Agent camera stream..."
+                          : "RTSP source is handled by the Edge Agent. The annotated live YOLO feed is shown in the panel beside this one."}
+                      </div>
                     ) : (
                       <video
                         width="100%"
@@ -2224,17 +2113,40 @@ function AIVisionCenter() {
                       </span>
                     </div>
 
-                    <img
-                      src={`${YOLO_STREAM_BASE}/stream/${selectedCamera.id}`}
-                      alt={`Live YOLO analysis for ${selectedCamera.id}`}
-                      style={{
-                        display: "block",
-                        width: "100%",
-                        height: isMobile ? "280px" : "430px",
-                        objectFit: "cover",
-                        background: "#000",
-                      }}
-                    />
+                    {selectedYoloStreamUrl ? (
+                      <img
+                        key={`yolo-${selectedCamera.id}`}
+                        src={selectedYoloStreamUrl}
+                        alt={`Live YOLO analysis for ${selectedCamera.id}`}
+                        style={{
+                          display: "block",
+                          width: "100%",
+                          height: isMobile ? "280px" : "430px",
+                          objectFit: "cover",
+                          background: "#000",
+                        }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          display: "grid",
+                          placeItems: "center",
+                          width: "100%",
+                          height: isMobile ? "280px" : "430px",
+                          padding: "16px",
+                          boxSizing: "border-box",
+                          color: "var(--text-muted)",
+                          textAlign: "center",
+                          background: "#000",
+                        }}
+                      >
+                        {!demoMonitoringActive
+                          ? "Activate monitoring to start live YOLO detection."
+                          : isLocalDashboard
+                            ? "Waiting for the Edge Agent's local YOLO stream..."
+                            : "Waiting for the authenticated live YOLO stream..."}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -2245,7 +2157,7 @@ function AIVisionCenter() {
                     AI METRICS
                 ================================================= */}
 
-                {selectedCameraStatus?.detection && (
+                {demoMonitoringActive && selectedCameraStatus?.detection && (
                   <div
                     style={{
                       display:
@@ -2417,7 +2329,7 @@ function AIVisionCenter() {
                     AI RECOMMENDATION
                 ================================================= */}
 
-                {selectedCameraStatus?.detection && (
+                {demoMonitoringActive && selectedCameraStatus?.detection && (
                   <div
                     style={{
                       marginTop:
@@ -2497,565 +2409,6 @@ function AIVisionCenter() {
           )}
       </div>
 
-      {/* =================================================
-          AI ANALYSIS ENGINE
-      ================================================= */}
-
-      <div
-        className="section-card"
-        style={{
-          marginBottom:
-            "25px",
-        }}
-      >
-        <div
-          style={{
-            display:
-              "flex",
-            justifyContent:
-              "space-between",
-            alignItems:
-              "center",
-            marginBottom:
-              "20px",
-          }}
-        >
-          <div>
-            <h2>
-               AI Traffic Analysis Engine
-            </h2>
-
-            <p
-              style={{
-                color:
-                  "var(--text-muted)",
-                marginTop:
-                  "6px",
-              }}
-            >
-              Upload an image or video
-              for the existing AI
-              analysis pipeline.
-            </p>
-          </div>
-
-          
-        </div>
-
-        <div
-          style={{
-            background:
-              "var(--app-surface-2)",
-            border:
-              "2px dashed #3B82F6",
-            borderRadius:
-              "15px",
-            padding:
-              "25px",
-            textAlign:
-              "center",
-            marginBottom:
-              "20px",
-          }}
-        >
-          <input
-            type="file"
-            accept="image/*,video/*"
-            onChange={(
-              e
-            ) => {
-              const file =
-                e.target.files?.[0];
-
-              setSelectedFile(
-                file || null
-              );
-
-              if (
-                file &&
-                file.type.startsWith(
-                  "video"
-                )
-              ) {
-                setFileType(
-                  "video"
-                );
-              } else {
-                setFileType(
-                  "image"
-                );
-              }
-            }}
-          />
-
-          <p
-            style={{
-              color:
-                "var(--text-muted)",
-              marginTop:
-                "10px",
-            }}
-          >
-            📤 Select an image or video
-            for AI analysis
-          </p>
-        </div>
-
-        <div
-          style={{
-            display:
-              "flex",
-            gap:
-              "12px",
-            alignItems:
-              "center",
-            flexWrap:
-              "wrap",
-          }}
-        >
-          <button
-            onClick={
-              analyzeTraffic
-            }
-            disabled={
-              loading
-            }
-            style={{
-              background:
-                "#2563EB",
-              color:
-                "white",
-              border:
-                "none",
-              padding:
-                "12px 20px",
-              borderRadius:
-                "10px",
-              cursor:
-                loading
-                  ? "not-allowed"
-                  : "pointer",
-              fontWeight:
-                "700",
-            }}
-          >
-            {loading
-              ? "⏳ Analyzing..."
-              : "🚦 Analyze Traffic"}
-          </button>
-
-          <button
-            onClick={
-              downloadReport
-            }
-            disabled={
-              !result
-            }
-            style={{
-              background:
-                "#16A34A",
-              color:
-                "white",
-              border:
-                "none",
-              padding:
-                "12px 20px",
-              borderRadius:
-                "10px",
-              cursor:
-                !result
-                  ? "not-allowed"
-                  : "pointer",
-              fontWeight:
-                "700",
-            }}
-          >
-            📄 Download Report
-          </button>
-        </div>
-      </div>
-
-      {/* =================================================
-          AI RESULTS
-      ================================================= */}
-
-      {result && (
-        <>
-          <div
-            className="section-card"
-            style={{
-              marginBottom:
-                "20px",
-            }}
-          >
-            <div
-              style={{
-                display:
-                  "flex",
-                justifyContent:
-                  "space-between",
-                alignItems:
-                  "center",
-              }}
-            >
-              <div>
-                <h2>
-                  🤖 AI Analysis Results
-                </h2>
-
-                <p
-                  style={{
-                    color:
-                      "var(--text-muted)",
-                    marginTop:
-                      "6px",
-                  }}
-                >
-                  AI-generated traffic
-                  analysis summary.
-                </p>
-              </div>
-
-              <span
-                style={{
-                  background:
-                    "#16A34A",
-                  color:
-                    "white",
-                  padding:
-                    "8px 16px",
-                  borderRadius:
-                    "20px",
-                  fontWeight:
-                    "700",
-                }}
-              >
-                ✔ COMPLETE
-              </span>
-            </div>
-          </div>
-
-          <div
-            className="cards"
-            style={{
-              marginBottom:
-                "20px",
-            }}
-          >
-            <div className="card">
-              <h3>
-                🚗 Vehicle Count
-              </h3>
-
-              <h2>
-                {result.vehicleCount ??
-                  result.averageVehicleCount ??
-                  0}
-              </h2>
-            </div>
-
-            {result.peakVehicleCount !=
-              null && (
-              <div className="card">
-                <h3>
-                  📈 Peak Vehicles
-                </h3>
-
-                <h2>
-                  {
-                    result.peakVehicleCount
-                  }
-                </h2>
-              </div>
-            )}
-
-            <div className="card">
-              <h3>
-                🚦 Congestion
-              </h3>
-
-              <h2
-                style={{
-                  color:
-                    result.congestion ===
-                    "High"
-                      ? "#EF4444"
-                      : result.congestion ===
-                        "Medium"
-                      ? "#F59E0B"
-                      : "#22C55E",
-                }}
-              >
-                {
-                  result.congestion ||
-                  "Unknown"
-                }
-              </h2>
-            </div>
-
-            <div className="card">
-              <h3>
-                💡 AI Recommendation
-              </h3>
-
-              <p
-                style={{
-                  fontSize:
-                    "16px",
-                  fontWeight:
-                    "600",
-                  color:
-                    "var(--text-primary)",
-                  lineHeight:
-                    "1.6",
-                }}
-              >
-                {
-                  result.recommendation ||
-                  "No recommendation available"
-                }
-              </p>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* =================================================
-          ACCIDENT DETECTION
-      ================================================= */}
-
-      {result?.accidentDetected && (
-        <div
-          className="section-card"
-          style={{
-            marginBottom:
-              "25px",
-            border:
-              "2px solid #EF4444",
-            background:
-              "rgba(239,68,68,.08)",
-          }}
-        >
-          <h2
-            style={{
-              color:
-                "#EF4444",
-              marginBottom:
-                "15px",
-            }}
-          >
-            🚨 Accident Detected
-          </h2>
-
-          <div
-            style={{
-              display:
-                "grid",
-              gridTemplateColumns:
-                isMobile
-                  ? "1fr"
-                  : "repeat(2,1fr)",
-              gap:
-                "20px",
-            }}
-          >
-            <div>
-              <p>
-                <strong>
-                  Severity
-                </strong>
-              </p>
-
-              <h3
-                style={{
-                  color:
-                    "#EF4444",
-                }}
-              >
-                {
-                  result.accidentSeverity
-                }
-              </h3>
-            </div>
-
-            <div>
-              <p>
-                <strong>
-                  AI Status
-                </strong>
-              </p>
-
-              <h3
-                style={{
-                  color:
-                    "#22C55E",
-                }}
-              >
-                Detection Successful
-              </h3>
-            </div>
-          </div>
-
-          <div
-            style={{
-              marginTop:
-                "20px",
-              padding:
-                "15px",
-              borderRadius:
-                "10px",
-              background:
-                "#991B1B",
-              color:
-                "white",
-              fontWeight:
-                "700",
-            }}
-          >
-            Accident detected by AI
-            surveillance.
-          </div>
-
-          <div
-            style={{
-              marginTop:
-                "20px",
-              display:
-                "flex",
-              gap:
-                "15px",
-              flexWrap:
-                "wrap",
-            }}
-          >
-            <button
-              onClick={() => {
-                window.location.href =
-                  "/emergency-response";
-              }}
-              style={{
-                background:
-                  "#DC2626",
-                color:
-                  "white",
-                border:
-                  "none",
-                padding:
-                  "12px 18px",
-                borderRadius:
-                  "10px",
-                cursor:
-                  "pointer",
-                fontWeight:
-                  "700",
-              }}
-            >
-              🚑 Open Emergency Response
-            </button>
-
-            <button
-              onClick={() => {
-                window.location.href =
-                  "/emergency-response";
-              }}
-              style={{
-                background:
-                  "#16A34A",
-                color:
-                  "white",
-                border:
-                  "none",
-                padding:
-                  "12px 18px",
-                borderRadius:
-                  "10px",
-                cursor:
-                  "pointer",
-                fontWeight:
-                  "700",
-              }}
-            >
-              🟢 Open Emergency Response
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* =================================================
-          DETECTION OUTPUT
-      ================================================= */}
-
-      {imageUrl && (
-        <div
-          className="section-card"
-          style={{
-            marginBottom:
-              "25px",
-          }}
-        >
-          <div
-            style={{
-              display:
-                "flex",
-              justifyContent:
-                "space-between",
-              alignItems:
-                "center",
-              marginBottom:
-                "15px",
-            }}
-          >
-            <div>
-              <h2>
-                🤖 Detection Output
-              </h2>
-
-              <p
-                style={{
-                  color:
-                    "var(--text-muted)",
-                  marginTop:
-                    "6px",
-                }}
-              >
-                Annotated traffic detection
-                generated by the existing
-                YOLO pipeline.
-              </p>
-            </div>
-
-            <span
-              style={{
-                background:
-                  "#2563EB",
-                color:
-                  "white",
-                padding:
-                  "8px 15px",
-                borderRadius:
-                  "20px",
-                fontWeight:
-                  "700",
-              }}
-            >
-              AI OUTPUT
-            </span>
-          </div>
-
-          <img
-            src={imageUrl}
-            alt="YOLO Result"
-            style={{
-              width:
-                "100%",
-              borderRadius:
-                "15px",
-              border:
-                "2px solid rgba(59,130,246,.3)",
-            }}
-          />
-        </div>
-      )}
     </MainLayout>
   );
 }

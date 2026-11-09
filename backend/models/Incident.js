@@ -28,6 +28,13 @@ const incidentSchema = new mongoose.Schema(
     description: {
       type: String,
     },
+
+    sourceMode: {
+      type: String,
+      enum: ["LIVE", "DEMO"],
+      default: "LIVE",
+      index: true,
+    },
   },
   {
     timestamps: true,
