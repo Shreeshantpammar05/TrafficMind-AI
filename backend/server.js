@@ -1,4 +1,5 @@
 require("dotenv").config();
+const demoControlRoutes = require("./routes/demoControlRoutes");
 
 const notificationRoutes = require("./routes/notificationRoutes");
 const http = require("http");
@@ -301,6 +302,8 @@ app.use(
 app.use("/api/alerts", alertRoutes);
 
 app.use("/api", nearbyServicesRoutes);
+
+app.use("/api/demo-control", demoControlRoutes);
 
 console.log("URI exists:", !!process.env.MONGO_URI);
 
