@@ -1,3 +1,8 @@
+
+import L from "leaflet";
+import markerIconRetina from "leaflet/dist/images/marker-icon-2x.png";
+import markerIcon from "leaflet/dist/images/marker-icon.png";
+import markerShadow from "leaflet/dist/images/marker-shadow.png";
 import { icon as leafletIcon } from "leaflet";
 import { API_BASE } from "../config/api.js";
 import {
@@ -20,7 +25,16 @@ import {
   useMap,
 } from "react-leaflet";
 
-
+// Vite does not automatically resolve Leaflet's default marker image paths.
+// Import the assets so they are included in the production build, then point
+// Leaflet's default markers at the generated asset URLs. This fixes the
+// marker-icon-2x.png and marker-shadow.png 404 errors on Render.
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: markerIconRetina,
+  iconUrl: markerIcon,
+  shadowUrl: markerShadow,
+});
 
 const NEARBY_RADIUS_KM = Number(
   import.meta.env
