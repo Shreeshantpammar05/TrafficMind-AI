@@ -1,7 +1,9 @@
+
 import AdminRoute from "./components/AdminRoute";
 import GovernmentRoute from "./components/GovernmentRoute";
 import ProtectedRoute from "./components/ProtectedRoute";
 
+import LandingPage from "./pages/LandingPage";
 import AIVisionCenter from "./pages/AIVisionCenter";
 import EmergencyResponse from "./pages/EmergencyResponse";
 import AdminCenter from "./pages/AdminCenter";
@@ -13,6 +15,7 @@ import {
   BrowserRouter,
   Routes,
   Route,
+  Navigate,
 } from "react-router-dom";
 
 import Dashboard from "./components/Dashboard";
@@ -27,14 +30,14 @@ function App() {
     <ThemeProvider>
       <BrowserRouter>
         <Routes>
-          {/* =================================================
-              PUBLIC
-              ================================================= */}
+          {/* PUBLIC LANDING PAGE */}
 
           <Route
             path="/"
-            element={<Login />}
+            element={<LandingPage />}
           />
+
+          {/* AUTHENTICATION */}
 
           <Route
             path="/login"
@@ -46,9 +49,7 @@ function App() {
             element={<Register />}
           />
 
-          {/* =================================================
-              AUTHENTICATED USERS
-              ================================================= */}
+          {/* AUTHENTICATED USERS */}
 
           <Route
             path="/dashboard"
@@ -77,9 +78,7 @@ function App() {
             }
           />
 
-          {/* =================================================
-              OWN PROFILE
-              ================================================= */}
+          {/* OWN PROFILE */}
 
           <Route
             path="/profile"
@@ -90,9 +89,7 @@ function App() {
             }
           />
 
-          {/* =================================================
-              GOVERNMENT + ADMIN
-              ================================================= */}
+          {/* GOVERNMENT + ADMIN */}
 
           <Route
             path="/emergency-response"
@@ -112,9 +109,7 @@ function App() {
             }
           />
 
-          {/* =================================================
-              ADMIN ONLY
-              ================================================= */}
+          {/* ADMIN ONLY */}
 
           <Route
             path="/admin"
@@ -123,6 +118,13 @@ function App() {
                 <AdminCenter />
               </AdminRoute>
             }
+          />
+
+          {/* UNKNOWN ROUTES */}
+
+          <Route
+            path="*"
+            element={<Navigate to="/" replace />}
           />
         </Routes>
       </BrowserRouter>

@@ -1,724 +1,302 @@
 import { API_BASE } from "../config/api.js";
 import { useState } from "react";
 import axios from "axios";
-import {
-  useNavigate,
-  Link,
-} from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import ThemeToggle from "../components/ThemeToggle";
+import "./AuthPages.css";
 
 function Register() {
-  const navigate =
-    useNavigate();
+  const navigate = useNavigate();
 
-  const [formData, setFormData] =
-    useState({
-      name: "",
-      email: "",
-      password: "",
-      role: "citizen",
-      governmentProof: "",
-      governmentOfficerType: "",
-      jurisdictionDistrict: "",
-      jurisdictionArea: "",
-    });
+  const [formData, setFormData] = useState({
+    name: "",
+    email: "",
+    password: "",
+    role: "citizen",
+    governmentProof: "",
+    governmentOfficerType: "",
+    jurisdictionDistrict: "",
+    jurisdictionArea: "",
+  });
+  const [loading, setLoading] = useState(false);
 
-  const [loading, setLoading] =
-    useState(false);
+  const handleChange = (event) => {
+    const { name, value } = event.target;
 
-
-
-  const handleChange = (e) => {
-    const {
-      name,
-      value,
-    } = e.target;
-
-    setFormData(
-      (current) => ({
-        ...current,
-        [name]: value,
-
-        /*
-         * Clear all government-only
-         * fields when switching to citizen.
-         */
-        ...(name === "role" &&
-        value === "citizen"
-          ? {
-              governmentProof:
-                "",
-              governmentOfficerType:
-                "",
-              jurisdictionDistrict:
-                "",
-              jurisdictionArea:
-                "",
-            }
-          : {}),
-
-        /*
-         * Main Officer does not need
-         * a specific area.
-         */
-        ...(name ===
-          "governmentOfficerType" &&
-        value ===
-          "main_officer"
-          ? {
-              jurisdictionArea:
-                "",
-            }
-          : {}),
-      })
-    );
+    setFormData((current) => ({
+      ...current,
+      [name]: value,
+      // Clear government-only fields when switching to citizen.
+      ...(name === "role" && value === "citizen"
+        ? {
+            governmentProof: "",
+            governmentOfficerType: "",
+            jurisdictionDistrict: "",
+            jurisdictionArea: "",
+          }
+        : {}),
+      // Main Officer does not need a specific area.
+      ...(name === "governmentOfficerType" && value === "main_officer"
+        ? { jurisdictionArea: "" }
+        : {}),
+    }));
   };
 
-  const handleSubmit =
-    async (e) => {
-      e.preventDefault();
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+
+    if (formData.role === "government") {
+      if (!formData.governmentProof.trim()) {
+        alert("Government ID is required.");
+        return;
+      }
+
+      if (!formData.governmentOfficerType) {
+        alert("Please select Main Officer or Sub Officer.");
+        return;
+      }
+
+      if (!formData.jurisdictionDistrict.trim()) {
+        alert("District is required for government officers.");
+        return;
+      }
 
       if (
-        formData.role ===
-        "government"
+        formData.governmentOfficerType === "sub_officer" &&
+        !formData.jurisdictionArea.trim()
       ) {
-        if (
-          !formData.governmentProof.trim()
-        ) {
-          alert(
-            "Government ID is required."
-          );
-          return;
-        }
-
-        if (
-          !formData.governmentOfficerType
-        ) {
-          alert(
-            "Please select Main Officer or Sub Officer."
-          );
-          return;
-        }
-
-        if (
-          !formData.jurisdictionDistrict.trim()
-        ) {
-          alert(
-            "District is required for government officers."
-          );
-          return;
-        }
-
-        if (
-          formData.governmentOfficerType ===
-            "sub_officer" &&
-          !formData.jurisdictionArea.trim()
-        ) {
-          alert(
-            "Assigned area is required for Sub Officers."
-          );
-          return;
-        }
+        alert("Assigned area is required for Sub Officers.");
+        return;
       }
+    }
 
-      try {
-        setLoading(true);
+    try {
+      setLoading(true);
 
-        const payload = {
-          ...formData,
+      const payload = {
+        ...formData,
+        name: formData.name.trim(),
+        email: formData.email.trim().toLowerCase(),
+        governmentProof: formData.governmentProof.trim(),
+        jurisdictionDistrict: formData.jurisdictionDistrict.trim(),
+        jurisdictionArea: formData.jurisdictionArea.trim(),
+      };
 
-          name:
-            formData.name.trim(),
+      const res = await axios.post(`${API_BASE}/api/register`, payload);
 
-          email:
-            formData.email
-              .trim()
-              .toLowerCase(),
+      alert(res.data?.message || "Registration successful.");
 
-          governmentProof:
-            formData.governmentProof.trim(),
+      setFormData({
+        name: "",
+        email: "",
+        password: "",
+        role: "citizen",
+        governmentProof: "",
+        governmentOfficerType: "",
+        jurisdictionDistrict: "",
+        jurisdictionArea: "",
+      });
 
-          jurisdictionDistrict:
-            formData.jurisdictionDistrict.trim(),
-
-          jurisdictionArea:
-            formData.jurisdictionArea.trim(),
-        };
-
-        const res =
-          await axios.post(
-            `${API_BASE}/api/register`,
-            payload
-          );
-
-        alert(
-          res.data?.message ||
-            "Registration successful."
-        );
-
-        setFormData({
-          name: "",
-          email: "",
-          password: "",
-          role: "citizen",
-          governmentProof: "",
-          governmentOfficerType:
-            "",
-          jurisdictionDistrict:
-            "",
-          jurisdictionArea:
-            "",
-        });
-
-        navigate("/login");
-      } catch (error) {
-        alert(
-          error.response?.data?.message ||
-            error.response?.data?.error ||
-            error.message ||
-            "Registration failed. Please try again."
-        );
-      } finally {
-        setLoading(false);
-      }
-    };
-
-  const inputStyle = {
-    width: "100%",
-    padding:
-      "13px 14px",
-    marginTop:
-      "8px",
-    borderRadius:
-      "11px",
-    border:
-      "1px solid var(--border-strong)",
-    background:
-      "var(--app-surface-2)",
-    color:
-      "var(--text-primary)",
-    boxSizing:
-      "border-box",
-    outline:
-      "none",
+      navigate("/login");
+    } catch (error) {
+      alert(
+        error.response?.data?.message ||
+          error.response?.data?.error ||
+          error.message ||
+          "Registration failed. Please try again."
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <div
-      style={{
-        minHeight:
-          "100vh",
-        display:
-          "flex",
-        justifyContent:
-          "center",
-        alignItems:
-          "center",
-        background:
-          "radial-gradient(circle at top right, rgba(37,99,235,.12), transparent 30%), radial-gradient(circle at bottom left, rgba(14,165,233,.08), transparent 30%), var(--app-bg)",
-        color:
-          "var(--text-primary)",
-        padding:
-          "20px",
-        boxSizing:
-          "border-box",
-      }}
-    >
-      <div
-        style={{
-          width:
-            "min(450px, 100%)",
-          background:
-            "var(--app-surface)",
-          backdropFilter:
-            "blur(18px)",
-          borderRadius:
-            "22px",
-          padding:
-            "40px",
-          border:
-            "1px solid var(--border-strong)",
-          boxShadow:
-            "var(--shadow)",
-          boxSizing:
-            "border-box",
-        }}
-      >
-        <div
-          style={{
-            textAlign:
-              "center",
-          }}
-        >
-          <div
-            style={{
-              width:
-                "56px",
-              height:
-                "56px",
-              margin:
-                "0 auto 14px",
-              borderRadius:
-                "16px",
-              display:
-                "grid",
-              placeItems:
-                "center",
-              background:
-                "var(--accent-soft)",
-              border:
-                "1px solid rgba(59,130,246,.24)",
-              fontSize:
-                "26px",
-            }}
-          >
-            🚦
+    <main className="tm-auth-shell tm-register-shell">
+      <header className="tm-auth-header">
+        <Link to="/" className="tm-auth-brand" aria-label="TrafficMind AI home">
+          <span className="tm-auth-brand-mark">T</span>
+          <span>TrafficMind <b>AI</b></span>
+        </Link>
+        <ThemeToggle />
+      </header>
+
+      <div className="tm-auth-layout tm-register-layout">
+        <section className="tm-auth-intro tm-register-intro" aria-labelledby="register-intro-title">
+          <span className="tm-auth-eyebrow">JOIN THE PLATFORM</span>
+          <h1 id="register-intro-title">
+            One connected workspace.
+            <span> Clearer traffic awareness.</span>
+          </h1>
+          <p>
+            Create an account to access the TrafficMind AI environment.
+            Choose the account type that matches your role.
+          </p>
+          <div className="tm-register-note">
+            <strong>Government Officer?</strong>
+            <span>
+              Submit your officer details and jurisdiction. Government
+              applications follow the existing verification process.
+            </span>
+          </div>
+        </section>
+
+        <section className="tm-auth-card tm-register-card" aria-labelledby="register-title">
+          <div className="tm-auth-card-heading">
+            <span className="tm-auth-section-label">ACCOUNT SETUP</span>
+            <h2 id="register-title">Create your account</h2>
+            <p>Complete the details below to get started.</p>
           </div>
 
-          <h1
-            style={{
-              margin:
-                "0 0 5px",
-              fontSize:
-                "34px",
-              fontWeight:
-                "850",
-              letterSpacing:
-                "-.03em",
-              color:
-                "var(--text-primary)",
-            }}
-          >
-            TrafficMind AI
-          </h1>
+          <form onSubmit={handleSubmit} className="tm-auth-form tm-register-form">
+            <div className="tm-form-field">
+              <label htmlFor="register-name">Full name</label>
+              <input
+                id="register-name"
+                type="text"
+                name="name"
+                placeholder="Enter your full name"
+                value={formData.name}
+                onChange={handleChange}
+                autoComplete="name"
+                required
+              />
+            </div>
 
-          <p
-            style={{
-              color:
-                "var(--text-muted)",
-              marginBottom:
-                "30px",
-            }}
-          >
-            Smart City Registration Portal
-          </p>
-        </div>
+            <div className="tm-form-field">
+              <label htmlFor="register-email">Email address</label>
+              <input
+                id="register-email"
+                type="email"
+                name="email"
+                placeholder="you@example.com"
+                value={formData.email}
+                onChange={handleChange}
+                autoComplete="email"
+                required
+              />
+            </div>
 
-        <form
-          onSubmit={
-            handleSubmit
-          }
-        >
-          <label
-            htmlFor="register-name"
-            style={{
-              display:
-                "block",
-              color:
-                "var(--text-secondary)",
-              fontSize:
-                "13px",
-              fontWeight:
-                "700",
-              marginBottom:
-                "12px",
-            }}
-          >
-            Full Name
+            <div className="tm-form-field">
+              <label htmlFor="register-password">Password</label>
+              <input
+                id="register-password"
+                type="password"
+                name="password"
+                placeholder="Create a password"
+                value={formData.password}
+                onChange={handleChange}
+                autoComplete="new-password"
+                required
+              />
+            </div>
 
-            <input
-              id="register-name"
-              type="text"
-              name="name"
-              placeholder="Enter your full name"
-              value={
-                formData.name
-              }
-              onChange={
-                handleChange
-              }
-              autoComplete="name"
-              required
-              style={
-                inputStyle
-              }
-            />
-          </label>
-
-          <label
-            htmlFor="register-email"
-            style={{
-              display:
-                "block",
-              color:
-                "var(--text-secondary)",
-              fontSize:
-                "13px",
-              fontWeight:
-                "700",
-              marginBottom:
-                "12px",
-            }}
-          >
-            Email Address
-
-            <input
-              id="register-email"
-              type="email"
-              name="email"
-              placeholder="Enter your email"
-              value={
-                formData.email
-              }
-              onChange={
-                handleChange
-              }
-              autoComplete="email"
-              required
-              style={
-                inputStyle
-              }
-            />
-          </label>
-
-          <label
-            htmlFor="register-password"
-            style={{
-              display:
-                "block",
-              color:
-                "var(--text-secondary)",
-              fontSize:
-                "13px",
-              fontWeight:
-                "700",
-              marginBottom:
-                "12px",
-            }}
-          >
-            Password
-
-            <input
-              id="register-password"
-              type="password"
-              name="password"
-              placeholder="Create a password"
-              value={
-                formData.password
-              }
-              onChange={
-                handleChange
-              }
-              autoComplete="new-password"
-              required
-              style={
-                inputStyle
-              }
-            />
-          </label>
-
-          <label
-            htmlFor="register-role"
-            style={{
-              display:
-                "block",
-              color:
-                "var(--text-secondary)",
-              fontSize:
-                "13px",
-              fontWeight:
-                "700",
-              marginBottom:
-                "12px",
-            }}
-          >
-            Account Type
-
-            <select
-              id="register-role"
-              name="role"
-              value={
-                formData.role
-              }
-              onChange={
-                handleChange
-              }
-              style={
-                inputStyle
-              }
-            >
-              <option value="citizen">
-                Citizen
-              </option>
-
-              <option value="government">
-                Government Officer
-              </option>
-            </select>
-          </label>
-
-          {formData.role ===
-            "government" && (
-            <>
-              <label
-                htmlFor="government-officer-type"
-                style={{
-                  display:
-                    "block",
-                  color:
-                    "var(--text-secondary)",
-                  fontSize:
-                    "13px",
-                  fontWeight:
-                    "700",
-                  marginBottom:
-                    "12px",
-                }}
+            <div className="tm-form-field">
+              <label htmlFor="register-role">Account type</label>
+              <select
+                id="register-role"
+                name="role"
+                value={formData.role}
+                onChange={handleChange}
               >
-                Government Officer Type
+                <option value="citizen">Citizen</option>
+                <option value="government">Government Officer</option>
+              </select>
+            </div>
 
-                <select
-                  id="government-officer-type"
-                  name="governmentOfficerType"
-                  value={
-                    formData.governmentOfficerType
-                  }
-                  onChange={
-                    handleChange
-                  }
-                  style={
-                    inputStyle
-                  }
-                  required
-                >
-                  <option value="">
-                    Select Officer Type
-                  </option>
+            {formData.role === "government" && (
+              <div className="tm-government-fields">
+                <div className="tm-government-heading">
+                  <span>GOVERNMENT OFFICER DETAILS</span>
+                  <p>Provide the information required for officer verification.</p>
+                </div>
 
-                  <option value="main_officer">
-                    Main Officer
-                  </option>
-
-                  <option value="sub_officer">
-                    Sub Officer
-                  </option>
-                </select>
-              </label>
-
-              <label
-                htmlFor="government-proof"
-                style={{
-                  display:
-                    "block",
-                  color:
-                    "var(--text-secondary)",
-                  fontSize:
-                    "13px",
-                  fontWeight:
-                    "700",
-                  marginBottom:
-                    "12px",
-                }}
-              >
-                Government ID Number
-
-                <input
-                  id="government-proof"
-                  type="text"
-                  name="governmentProof"
-                  placeholder="Enter government ID"
-                  value={
-                    formData.governmentProof
-                  }
-                  onChange={
-                    handleChange
-                  }
-                  autoComplete="off"
-                  required
-                  style={
-                    inputStyle
-                  }
-                />
-              </label>
-
-              <label
-                htmlFor="jurisdiction-district"
-                style={{
-                  display:
-                    "block",
-                  color:
-                    "var(--text-secondary)",
-                  fontSize:
-                    "13px",
-                  fontWeight:
-                    "700",
-                  marginBottom:
-                    "12px",
-                }}
-              >
-                District
-
-                <input
-                  id="jurisdiction-district"
-                  type="text"
-                  name="jurisdictionDistrict"
-                  placeholder="e.g. Bengaluru Urban"
-                  value={
-                    formData.jurisdictionDistrict
-                  }
-                  onChange={
-                    handleChange
-                  }
-                  required
-                  style={
-                    inputStyle
-                  }
-                />
-              </label>
-
-              {formData.governmentOfficerType ===
-                "sub_officer" && (
-                <label
-                  htmlFor="jurisdiction-area"
-                  style={{
-                    display:
-                      "block",
-                    color:
-                      "var(--text-secondary)",
-                    fontSize:
-                      "13px",
-                    fontWeight:
-                      "700",
-                    marginBottom:
-                      "12px",
-                  }}
-                >
-                  Assigned Area
-
-                  <input
-                    id="jurisdiction-area"
-                    type="text"
-                    name="jurisdictionArea"
-                    placeholder="e.g. Dasarahalli"
-                    value={
-                      formData.jurisdictionArea
-                    }
-                    onChange={
-                      handleChange
-                    }
+                <div className="tm-form-field">
+                  <label htmlFor="government-officer-type">Officer type</label>
+                  <select
+                    id="government-officer-type"
+                    name="governmentOfficerType"
+                    value={formData.governmentOfficerType}
+                    onChange={handleChange}
                     required
-                    style={
-                      inputStyle
-                    }
+                  >
+                    <option value="">Select officer type</option>
+                    <option value="main_officer">Main Officer</option>
+                    <option value="sub_officer">Sub Officer</option>
+                  </select>
+                </div>
+
+                <div className="tm-form-field">
+                  <label htmlFor="government-proof">Government ID number</label>
+                  <input
+                    id="government-proof"
+                    type="text"
+                    name="governmentProof"
+                    placeholder="Enter government ID"
+                    value={formData.governmentProof}
+                    onChange={handleChange}
+                    autoComplete="off"
+                    required
                   />
-                </label>
-              )}
+                </div>
 
-              <div
-                style={{
-                  background:
-                    "var(--accent-soft)",
-                  border:
-                    "1px solid var(--border)",
-                  color:
-                    "var(--text-secondary)",
-                  padding:
-                    "12px 14px",
-                  borderRadius:
-                    "11px",
-                  fontSize:
-                    "12px",
-                  lineHeight:
-                    "1.5",
-                  marginBottom:
-                    "12px",
-                }}
-              >
-                {formData.governmentOfficerType ===
-                "main_officer"
-                  ? "Main Officers are assigned at district level."
-                  : "Sub Officers are assigned to a specific area within their district."}
+                <div className="tm-form-field">
+                  <label htmlFor="jurisdiction-district">District</label>
+                  <input
+                    id="jurisdiction-district"
+                    type="text"
+                    name="jurisdictionDistrict"
+                    placeholder="e.g. Bengaluru Urban"
+                    value={formData.jurisdictionDistrict}
+                    onChange={handleChange}
+                    required
+                  />
+                </div>
+
+                {formData.governmentOfficerType === "sub_officer" && (
+                  <div className="tm-form-field">
+                    <label htmlFor="jurisdiction-area">Assigned area</label>
+                    <input
+                      id="jurisdiction-area"
+                      type="text"
+                      name="jurisdictionArea"
+                      placeholder="e.g. Dasarahalli"
+                      value={formData.jurisdictionArea}
+                      onChange={handleChange}
+                      required
+                    />
+                  </div>
+                )}
+
+                <div className="tm-government-hint">
+                  {formData.governmentOfficerType === "main_officer"
+                    ? "Main Officers are assigned at district level."
+                    : "Sub Officers are assigned to a specific area within their district."}
+                </div>
               </div>
-            </>
-          )}
+            )}
 
-          <button
-            type="submit"
-            disabled={
-              loading
-            }
-            style={{
-              width:
-                "100%",
-              padding:
-                "14px",
-              border:
-                "none",
-              borderRadius:
-                "12px",
-              background:
-                "linear-gradient(135deg,var(--accent-strong),var(--accent))",
-              color:
-                "#FFFFFF",
-              fontWeight:
-                "800",
-              cursor:
-                loading
-                  ? "not-allowed"
-                  : "pointer",
-              marginTop:
-                "8px",
-              opacity:
-                loading
-                  ? 0.7
-                  : 1,
-            }}
-          >
-            {loading
-              ? "Creating Account..."
-              : formData.role ===
-                "government"
-              ? "Submit Officer Application"
-              : "Create Account"}
-          </button>
-        </form>
+            <button className="tm-auth-submit" type="submit" disabled={loading}>
+              {loading
+                ? "Creating account…"
+                : formData.role === "government"
+                  ? "Submit officer application"
+                  : "Create account"}
+              <span aria-hidden="true">→</span>
+            </button>
+          </form>
 
-        <div
-          style={{
-            marginTop:
-              "20px",
-            textAlign:
-              "center",
-          }}
-        >
-          <p
-            style={{
-              color:
-                "var(--text-muted)",
-              marginBottom:
-                "8px",
-            }}
-          >
-            Already have an account?
-          </p>
-
-          <Link
-            to="/login"
-            style={{
-              color:
-                "var(--accent)",
-              fontWeight:
-                "800",
-              textDecoration:
-                "none",
-              fontSize:
-                "15px",
-            }}
-          >
-            🔐 Back to Login
-          </Link>
-        </div>
+          <div className="tm-auth-card-footer">
+            <span>Already have an account?</span>
+            <Link to="/login">Sign in</Link>
+          </div>
+        </section>
       </div>
-    </div>
+
+      <footer className="tm-auth-footer">
+        <Link to="/" className="tm-auth-footer-home">TrafficMind AI</Link>
+        <span>Intelligent traffic monitoring for smarter mobility.</span>
+      </footer>
+    </main>
   );
 }
 
