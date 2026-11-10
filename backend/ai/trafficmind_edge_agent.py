@@ -351,13 +351,15 @@ def compress_frame(jpeg: bytes) -> bytes | None:
 
 
 class FrameRelay:
-    """Relay only the newest available frame for each camera.
+    """Relay the original and annotated MJPEG frames for every camera.
 
-    A dedicated reader continuously drains the local MJPEG stream into a
-    one-frame slot. A separate uploader sends that newest frame at the
-    configured rate. Network delays therefore drop old frames instead of
-    building a queue and showing increasingly delayed video.
+    Each stream has its own reader, latest-frame slot and uploader. This keeps
+    both feeds independent: a slow upload on one stream cannot build a queue
+    or block the other stream. The existing YOLO upload remains the default
+    backend stream type for backward compatibility.
     """
+
+    STREAM_TYPES = ("normal", "yolo")
 
     def __init__(self) -> None:
         self.stop_event = threading.Event()
@@ -385,31 +387,36 @@ class FrameRelay:
             state = {
                 "stop": threading.Event(),
                 "lock": threading.Lock(),
-                "latest": None,
-                "sequence": 0,
-                "received_at": 0.0,
+                "latest": {kind: None for kind in self.STREAM_TYPES},
+                "sequence": {kind: 0 for kind in self.STREAM_TYPES},
+                "received_at": {kind: 0.0 for kind in self.STREAM_TYPES},
             }
-            reader = threading.Thread(
-                target=self._camera_reader,
-                args=(camera_id, state),
-                daemon=True,
-                name=f"edge-read-{camera_id}",
-            )
-            uploader = threading.Thread(
-                target=self._camera_uploader,
-                args=(camera_id, state),
-                daemon=True,
-                name=f"edge-upload-{camera_id}",
-            )
-            self.states[camera_id] = state
-            self.threads[camera_id] = [reader, uploader]
-            reader.start()
-            uploader.start()
-            log(f"Latest-frame relay started: {camera_id}")
+            camera_threads: list[threading.Thread] = []
+            for stream_type in self.STREAM_TYPES:
+                reader = threading.Thread(
+                    target=self._camera_reader,
+                    args=(camera_id, state, stream_type),
+                    daemon=True,
+                    name=f"edge-read-{stream_type}-{camera_id}",
+                )
+                uploader = threading.Thread(
+                    target=self._camera_uploader,
+                    args=(camera_id, state, stream_type),
+                    daemon=True,
+                    name=f"edge-upload-{stream_type}-{camera_id}",
+                )
+                camera_threads.extend((reader, uploader))
 
-    def _camera_reader(self, camera_id: str, state: dict) -> None:
-        """Continuously consume local MJPEG, replacing the one-frame slot."""
-        stream_url = f"{LOCAL_STREAM_BASE}/stream/{camera_id}"
+            self.states[camera_id] = state
+            self.threads[camera_id] = camera_threads
+            for thread in camera_threads:
+                thread.start()
+            log(f"Original + YOLO frame relays started: {camera_id}")
+
+    def _camera_reader(self, camera_id: str, state: dict, stream_type: str) -> None:
+        """Continuously drain one local MJPEG stream into its latest-frame slot."""
+        local_path = "normal-stream" if stream_type == "normal" else "stream"
+        stream_url = f"{LOCAL_STREAM_BASE}/{local_path}/{camera_id}"
 
         while not self.stop_event.is_set() and not state["stop"].is_set():
             try:
@@ -419,25 +426,25 @@ class FrameRelay:
                     timeout=(5, 20),
                 ) as response:
                     response.raise_for_status()
-                    for original_jpeg in extract_jpegs(response):
+                    for jpeg in extract_jpegs(response):
                         if self.stop_event.is_set() or state["stop"].is_set():
                             return
                         with state["lock"]:
-                            state["latest"] = original_jpeg
-                            state["sequence"] += 1
-                            state["received_at"] = time.monotonic()
+                            state["latest"][stream_type] = jpeg
+                            state["sequence"][stream_type] += 1
+                            state["received_at"][stream_type] = time.monotonic()
             except requests.RequestException as exc:
                 if not self.stop_event.is_set() and not state["stop"].is_set():
-                    log(f"Local stream reconnect {camera_id}: {exc}")
+                    log(f"Local {stream_type} stream reconnect {camera_id}: {exc}")
                     state["stop"].wait(1.0)
             except Exception as exc:  # noqa: BLE001
                 if not self.stop_event.is_set() and not state["stop"].is_set():
-                    log(f"Local frame reader error {camera_id}: {exc}")
+                    log(f"Local {stream_type} frame reader error {camera_id}: {exc}")
                     state["stop"].wait(1.0)
 
-    def _camera_uploader(self, camera_id: str, state: dict) -> None:
-        """Upload the most recent frame using one persistent HTTP connection."""
-        upload_url = endpoint(f"/edge/frame/{camera_id}")
+    def _camera_uploader(self, camera_id: str, state: dict, stream_type: str) -> None:
+        """Upload the newest frame for one stream using a persistent connection."""
+        upload_url = endpoint(f"/edge/frame/{camera_id}?type={stream_type}")
         last_uploaded_sequence = 0
         last_upload_at = 0.0
 
@@ -454,18 +461,18 @@ class FrameRelay:
                     break
 
                 with state["lock"]:
-                    original_jpeg = state["latest"]
-                    sequence = state["sequence"]
-                    received_at = state["received_at"]
+                    jpeg = state["latest"][stream_type]
+                    sequence = state["sequence"][stream_type]
+                    received_at = state["received_at"][stream_type]
 
-                if not original_jpeg or sequence == last_uploaded_sequence:
+                if not jpeg or sequence == last_uploaded_sequence:
                     continue
 
                 # Never send a buffered frame that has already become stale.
                 if time.monotonic() - received_at > 1.5:
                     continue
 
-                compressed = compress_frame(original_jpeg)
+                compressed = compress_frame(jpeg)
                 if not compressed:
                     last_uploaded_sequence = sequence
                     continue
@@ -478,7 +485,7 @@ class FrameRelay:
                     )
                     if upload.status_code in (403, 409):
                         log(
-                            f"Frame relay ended for {camera_id} "
+                            f"{stream_type} frame relay ended for {camera_id} "
                             f"(session status {upload.status_code})."
                         )
                         state["stop"].set()
@@ -488,7 +495,7 @@ class FrameRelay:
                     last_upload_at = time.monotonic()
                 except requests.RequestException as exc:
                     if not self.stop_event.is_set() and not state["stop"].is_set():
-                        log(f"Frame upload retry {camera_id}: {exc}")
+                        log(f"{stream_type} frame upload retry {camera_id}: {exc}")
                         state["stop"].wait(0.5)
 
     def stop(self) -> None:

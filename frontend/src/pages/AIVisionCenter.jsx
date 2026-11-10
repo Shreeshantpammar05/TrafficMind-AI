@@ -694,13 +694,17 @@ function AIVisionCenter() {
         : undefined;
 
   const selectedNormalStreamUrl =
-    isLocalDashboard &&
-    demoMonitoringActive &&
-    localStreamReady &&
-    selectedCamera &&
-    String(selectedCamera.source || "").trim().toLowerCase().startsWith("rtsp://")
-      ? `${LOCAL_STREAM_BASE}/normal-stream/${encodeURIComponent(selectedCamera.id)}`
-      : undefined;
+    !demoMonitoringActive ||
+    !selectedCamera ||
+    !String(selectedCamera.source || "").trim().toLowerCase().startsWith("rtsp://")
+      ? undefined
+      : isLocalDashboard
+        ? localStreamReady
+          ? `${LOCAL_STREAM_BASE}/normal-stream/${encodeURIComponent(selectedCamera.id)}`
+          : undefined
+        : demoStreamTicket
+          ? `${BASE_URL}/api/demo-control/stream/${encodeURIComponent(selectedCamera.id)}?ticket=${encodeURIComponent(demoStreamTicket)}&type=normal`
+          : undefined;
 
   // =====================================================
   // Camera Counts
@@ -2043,9 +2047,13 @@ function AIVisionCenter() {
                           background: "#000",
                         }}
                       >
-                        {isLocalDashboard && demoMonitoringActive
-                          ? "Connecting to the local Edge Agent camera stream..."
-                          : "RTSP source is handled by the Edge Agent. The annotated live YOLO feed is shown in the panel beside this one."}
+                        {!demoMonitoringActive
+                          ? "Activate Demo Mode to start the original camera feed."
+                          : isLocalDashboard
+                            ? "Connecting to the local Edge Agent camera stream..."
+                            : demoStreamTicket
+                              ? "Waiting for the original camera frame relay..."
+                              : "Waiting for the secure camera stream ticket..."}
                       </div>
                     ) : (
                       <video

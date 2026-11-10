@@ -315,6 +315,8 @@ router.post(
     expireSessionIfNeeded();
 
     const cameraId = String(req.params.cameraId || "").trim();
+    // Older Edge Agents omit the type and continue uploading YOLO frames.
+    const streamType = String(req.query.type || "yolo").trim().toLowerCase();
     const frame = req.body;
 
     if (!session.active) {
@@ -323,6 +325,10 @@ router.post(
 
     if (!session.activeCameraIds.includes(cameraId)) {
       return res.status(403).json({ success: false, message: "Camera is not part of this session." });
+    }
+
+    if (!['normal', 'yolo'].includes(streamType)) {
+      return res.status(400).json({ success: false, message: "Stream type must be normal or yolo." });
     }
 
     if (
@@ -336,13 +342,15 @@ router.post(
     }
 
     session.frameSequence += 1;
-    session.frames.set(cameraId, {
+    const cameraFrames = session.frames.get(cameraId) || {};
+    cameraFrames[streamType] = {
       sequence: session.frameSequence,
       jpeg: frame,
       receivedAt: Date.now(),
-    });
+    };
+    session.frames.set(cameraId, cameraFrames);
 
-    return res.status(202).json({ success: true });
+    return res.status(202).json({ success: true, streamType });
   }
 );
 
@@ -351,6 +359,11 @@ router.post(
 router.get("/stream/:cameraId", async (req, res) => {
   const cameraId = String(req.params.cameraId || "").trim();
   const ticket = req.query.ticket;
+  // Default to YOLO so existing Render clients and old tickets keep working.
+  const streamType = String(req.query.type || "yolo").trim().toLowerCase();
+  if (!['normal', 'yolo'].includes(streamType)) {
+    return res.status(400).end("Stream type must be normal or yolo");
+  }
 
   try {
     const decoded = jwt.verify(ticket, process.env.JWT_SECRET, {
@@ -385,7 +398,12 @@ router.get("/stream/:cameraId", async (req, res) => {
 
       if (!session.active) break;
 
-      const record = session.frames.get(cameraId);
+      const cameraFrames = session.frames.get(cameraId);
+      // Support the previous single-frame in-memory shape during a rolling
+      // process transition; new uploads are stored independently by type.
+      const record = cameraFrames?.[streamType] || (
+        streamType === "yolo" && cameraFrames?.jpeg ? cameraFrames : null
+      );
       if (record && record.sequence !== lastSequence) {
         lastSequence = record.sequence;
         const header = Buffer.from(
