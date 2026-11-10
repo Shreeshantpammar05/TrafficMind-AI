@@ -1,5 +1,6 @@
 
 
+
 import numpy as np
 import os
 import re
@@ -254,6 +255,34 @@ ACCIDENT_CONFIDENCE = float(
     )
 )
 
+# Live accident detections use a lower proposal threshold, then a separate
+# confirmation threshold plus temporal/spatial agreement. This improves
+# recall without immediately turning every low-confidence box into an alert.
+ACCIDENT_INFERENCE_CONFIDENCE = max(
+    0.01,
+    min(0.95, float(os.getenv("TRAFFIC_ACCIDENT_INFERENCE_CONFIDENCE", "0.25"))),
+)
+ACCIDENT_CONFIRM_CONFIDENCE = max(
+    ACCIDENT_INFERENCE_CONFIDENCE,
+    min(0.99, float(os.getenv("TRAFFIC_ACCIDENT_CONFIRM_CONFIDENCE", "0.40"))),
+)
+ACCIDENT_CONFIRMATION_HITS = max(
+    2,
+    int(os.getenv("TRAFFIC_ACCIDENT_CONFIRMATION_HITS", "2")),
+)
+ACCIDENT_CONFIRMATION_WINDOW = max(
+    ACCIDENT_CONFIRMATION_HITS,
+    int(os.getenv("TRAFFIC_ACCIDENT_CONFIRMATION_WINDOW", "3")),
+)
+ACCIDENT_BOX_MATCH_IOU = max(
+    0.0,
+    min(1.0, float(os.getenv("TRAFFIC_ACCIDENT_BOX_MATCH_IOU", "0.10"))),
+)
+ACCIDENT_NEGATIVE_CLASS_MARGIN = max(
+    0.0,
+    min(0.50, float(os.getenv("TRAFFIC_ACCIDENT_NEGATIVE_CLASS_MARGIN", "0.05"))),
+)
+
 # Accident persistence / temporal smoothing.
 # Keep a confirmed accident alive briefly when a later analysis misses it.
 ACCIDENT_MAX_MISSES = max(
@@ -485,6 +514,12 @@ RTSP_CONNECT_GRACE_PERIOD = max(
     ),
 )
 
+# RTSP video is rendered independently from the AI inference loop.
+# This keeps browser video near the source frame rate while YOLO runs
+# asynchronously on sampled frames.
+RTSP_RENDER_FPS = max(10, min(30, int(os.getenv("TRAFFIC_RTSP_RENDER_FPS", "25"))))
+RTSP_RENDER_INTERVAL = 1.0 / RTSP_RENDER_FPS
+
 
 def load_camera_configs():
     if not INTERNAL_AI_KEY:
@@ -604,6 +639,7 @@ def build_camera_runtime(config):
         ),
         source=source,
         frame_lock=threading.Lock(),
+        overlay_lock=threading.Lock(),
         accident_boxes=[],
         emergency_candidate_camera_ids=set(),
         emergency_signature=[],
@@ -638,6 +674,11 @@ def build_camera_runtime(config):
 
 def close_camera_runtime(camera):
     """Stop streams associated with one runtime."""
+    try:
+        stop_rtsp_render_worker(camera)
+    except Exception:
+        pass
+
     try:
         if camera.capture is not None:
             camera.capture.release()
@@ -896,12 +937,22 @@ class CameraRuntime:
     # FFmpeg-backed network stream support.
     # Used for RTSP sources because VLC/FFmpeg can decode
     # streams that OpenCV's direct RTSP capture may not open.
-    ffmpeg_process: Optional[subprocess.Popen] = None
+    # RTSP is read directly with OpenCV in a dedicated thread. This avoids
+    # piping FFmpeg MJPEG through stdout, which was publishing a single cached
+    # image repeatedly on the tested Windows/phone-camera setup.
+    rtsp_capture: Optional[cv2.VideoCapture] = None
+    ffmpeg_process: Optional[subprocess.Popen] = None  # legacy cleanup only
     ffmpeg_reader_thread: Optional[threading.Thread] = None
     ffmpeg_stop_event: Optional[threading.Event] = None
     ffmpeg_frame_lock: Optional[threading.Lock] = None
     latest_ffmpeg_frame: Optional[object] = None
+    ffmpeg_frame_sequence: int = 0
     ffmpeg_stream_ready: bool = False
+
+    # RTSP display rendering runs independently of model inference.
+    rtsp_render_thread: Optional[threading.Thread] = None
+    rtsp_render_stop_event: Optional[threading.Event] = None
+    overlay_lock: Optional[threading.Lock] = None
 
     frame_counter: int = 0
 
@@ -960,9 +1011,11 @@ class CameraRuntime:
     accident_severity: str = "NONE"
     accident_boxes: list = None
 
-    # Temporal accident state.
+    # Temporal accident state. Store the most recent candidate box sets so
+    # a single noisy frame cannot immediately create an incident.
     accident_missed_analyses: int = 0
     accident_candidate_confidence: float = 0.0
+    accident_candidate_history: list = None
 
     last_emergency_analysis: float = 0.0
     emergency_detected: bool = False
@@ -1097,68 +1150,124 @@ def normalize_emergency_type(class_name):
     return EMERGENCY_CLASS_MAP.get(normalized_name)
 
 
+def normalize_accident_label(class_name):
+    """Normalize the accident model's positive and negative class labels."""
+    normalized = re.sub(r"[^a-z0-9]+", "-", str(class_name or "").strip().lower())
+    normalized = normalized.strip("-")
+
+    if normalized in {"accident", "crash", "collision"}:
+        return "accident"
+    if normalized in {"no-accident", "noaccident", "non-accident", "normal", "no-crash"}:
+        return "no_accident"
+    return None
+
+
+def box_iou_xyxy(first, second):
+    """Calculate IoU for (x1, y1, x2, y2, confidence) boxes."""
+    x1 = max(float(first[0]), float(second[0]))
+    y1 = max(float(first[1]), float(second[1]))
+    x2 = min(float(first[2]), float(second[2]))
+    y2 = min(float(first[3]), float(second[3]))
+
+    intersection = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+    first_area = max(0.0, float(first[2]) - float(first[0])) * max(
+        0.0, float(first[3]) - float(first[1])
+    )
+    second_area = max(0.0, float(second[2]) - float(second[0])) * max(
+        0.0, float(second[3]) - float(second[1])
+    )
+    union = first_area + second_area - intersection
+    return intersection / union if union > 0.0 else 0.0
+
+
+def has_temporal_accident_consensus(current_boxes, previous_history):
+    """Require a current candidate to match a candidate in a recent analysis.
+
+    The rolling history includes empty analyses, so a one-off false positive
+    cannot activate an incident. Matching boxes across two of the last three
+    inference cycles confirms the same spatial event.
+    """
+    if not current_boxes:
+        return False
+
+    required_previous_hits = ACCIDENT_CONFIRMATION_HITS - 1
+    recent_history = previous_history[-(ACCIDENT_CONFIRMATION_WINDOW - 1):]
+
+    for current_box in current_boxes:
+        matched_previous_hits = 0
+        for previous_boxes in reversed(recent_history):
+            if any(
+                box_iou_xyxy(current_box, previous_box) >= ACCIDENT_BOX_MATCH_IOU
+                for previous_box in (previous_boxes or [])
+            ):
+                matched_previous_hits += 1
+
+        if matched_previous_hits >= required_previous_hits:
+            return True
+
+    return False
+
+
 # RTSP_READER_STABILITY_PATCH_V1
 def _stop_ffmpeg(camera):
-    """Stop one RTSP reader cleanly before another session is started.
+    """Stop one RTSP OpenCV reader and release its capture safely.
 
-    Keep local references to the old process/thread/event. The reader must
-    never observe a replacement stop event or clear state belonging to a
-    newer FFmpeg process.
+    The historical helper name is retained to minimize changes elsewhere in
+    the runner. RTSP frames are now read directly by OpenCV, not FFmpeg stdout.
     """
     stop_event = camera.ffmpeg_stop_event
-    process = camera.ffmpeg_process
     reader_thread = camera.ffmpeg_reader_thread
+    capture = getattr(camera, "rtsp_capture", None)
+    process = camera.ffmpeg_process  # clean up a legacy child if one exists
 
     if stop_event is not None:
         stop_event.set()
+
+    if reader_thread is not None and reader_thread is not threading.current_thread():
+        if reader_thread.is_alive():
+            reader_thread.join(timeout=4.0)
+
+        # OpenCV's FFmpeg read timeout should normally unblock the reader.
+        # Releasing the capture is a final unblock attempt on shutdown.
+        if reader_thread.is_alive() and capture is not None:
+            try:
+                capture.release()
+            except Exception:
+                pass
+            reader_thread.join(timeout=2.0)
+
+        if reader_thread.is_alive():
+            print(f"⚠️ RTSP reader did not exit promptly: {camera.camera_id}", flush=True)
 
     if process is not None:
         try:
             if process.poll() is None:
                 process.terminate()
-
                 try:
                     process.wait(timeout=3)
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait(timeout=3)
         except Exception as error:
-            print(
-                f"⚠️ FFmpeg stop warning {camera.camera_id}: {error}"
-            )
-
+            print(f"⚠️ Legacy FFmpeg stop warning {camera.camera_id}: {error}", flush=True)
         try:
             if process.stdout is not None and not process.stdout.closed:
                 process.stdout.close()
         except Exception:
             pass
 
-    if (
-        reader_thread is not None
-        and reader_thread is not threading.current_thread()
-        and reader_thread.is_alive()
-    ):
-        reader_thread.join(timeout=4)
+    if capture is not None:
+        try:
+            capture.release()
+        except Exception:
+            pass
 
-        if reader_thread.is_alive():
-            try:
-                if process is not None and process.stdout is not None:
-                    process.stdout.close()
-            except Exception:
-                pass
-            reader_thread.join(timeout=2)
-
-        if reader_thread.is_alive():
-            print(
-                f"⚠️ FFmpeg reader did not exit promptly: {camera.camera_id}"
-            )
-
+    if camera.rtsp_capture is capture:
+        camera.rtsp_capture = None
     if camera.ffmpeg_process is process:
         camera.ffmpeg_process = None
-
     if camera.ffmpeg_reader_thread is reader_thread:
         camera.ffmpeg_reader_thread = None
-
     if camera.ffmpeg_stop_event is stop_event:
         camera.ffmpeg_stop_event = None
 
@@ -1168,98 +1277,64 @@ def _stop_ffmpeg(camera):
 
     if camera.ffmpeg_frame_lock is None:
         camera.ffmpeg_frame_lock = threading.Lock()
-
     with camera.ffmpeg_frame_lock:
         camera.latest_ffmpeg_frame = None
 
-def _ffmpeg_reader(camera):
-    """Drain FFmpeg MJPEG output and publish only the newest decoded frame.
+    if camera.frame_lock is not None:
+        with camera.frame_lock:
+            camera.latest_source_jpeg = b""
+            camera.latest_jpeg = b""
 
-    Process, stop-event and lock references are captured once. Reconnects
-    create a new generation, so an old reader can never update/clear the new
-    generation's camera state.
+
+def _ffmpeg_reader(camera):
+    """Continuously read the RTSP source with OpenCV and publish new frames.
+
+    A single capture thread owns VideoCapture.read(). The display workers and
+    AI loop consume copies of the latest frame from a one-frame slot, so slow
+    inference never blocks the camera reader or queues stale video frames.
     """
-    process = camera.ffmpeg_process
+    capture = camera.rtsp_capture
     stop_event = camera.ffmpeg_stop_event
     frame_lock = camera.ffmpeg_frame_lock
 
-    if (
-        process is None
-        or process.stdout is None
-        or stop_event is None
-    ):
+    if capture is None or stop_event is None or frame_lock is None:
         return
 
-    if frame_lock is None:
-        frame_lock = threading.Lock()
-        camera.ffmpeg_frame_lock = frame_lock
-
-    buffer = bytearray()
-
+    consecutive_failures = 0
     try:
         while not stop_event.is_set():
-            try:
-                chunk = process.stdout.read(16384)
-            except (OSError, ValueError) as error:
-                if not stop_event.is_set():
+            ok, frame = capture.read()
+            if not ok or frame is None:
+                consecutive_failures += 1
+                if consecutive_failures >= 5:
                     print(
-                        f"⚠️ FFmpeg reader error "
-                        f"{camera.camera_id}: {error}"
+                        f"⚠️ RTSP capture read failed repeatedly: {camera.camera_id}",
+                        flush=True,
                     )
-                break
-
-            if not chunk:
-                break
-
-            buffer.extend(chunk)
-            newest_jpeg = None
-
-            # Extract every complete JPEG in this chunk, but decode only the
-            # newest one. This drops stale buffered frames instead of building
-            # latency while preserving any incomplete trailing JPEG.
-            while True:
-                start = buffer.find(b"\xff\xd8")
-
-                if start == -1:
-                    if len(buffer) > 2 * 1024 * 1024:
-                        del buffer[:-1]
                     break
-
-                if start > 0:
-                    del buffer[:start]
-
-                end = buffer.find(b"\xff\xd9", 2)
-
-                if end == -1:
-                    if len(buffer) > 4 * 1024 * 1024:
-                        buffer.clear()
-                    break
-
-                newest_jpeg = bytes(buffer[:end + 2])
-                del buffer[:end + 2]
-
-            if newest_jpeg is None:
+                stop_event.wait(0.05)
                 continue
 
-            array = np.frombuffer(
-                newest_jpeg,
-                dtype=np.uint8,
-            )
-            frame = cv2.imdecode(
-                array,
-                cv2.IMREAD_COLOR,
-            )
+            consecutive_failures = 0
+            frame = frame.copy()
 
-            if frame is None:
-                continue
-
-            if camera.ffmpeg_process is not process:
-                break
-
+            # Publish the newest source frame and monotonically increasing
+            # sequence. Consumers never hold this lock while doing inference.
             with frame_lock:
-                if camera.ffmpeg_process is not process:
+                if camera.rtsp_capture is not capture or stop_event.is_set():
                     break
                 camera.latest_ffmpeg_frame = frame
+                camera.ffmpeg_frame_sequence += 1
+
+            # Encode the normal/original feed once, directly from the source.
+            ok_jpeg, encoded = cv2.imencode(
+                ".jpg",
+                frame,
+                [cv2.IMWRITE_JPEG_QUALITY, 80],
+            )
+            if ok_jpeg and camera.frame_lock is not None:
+                with camera.frame_lock:
+                    camera.latest_source_jpeg = encoded.tobytes()
 
             camera.ffmpeg_stream_ready = True
             camera.last_ffmpeg_frame_time = time.monotonic()
@@ -1268,101 +1343,90 @@ def _ffmpeg_reader(camera):
     except Exception as error:  # noqa: BLE001
         if not stop_event.is_set():
             print(
-                f"⚠️ FFmpeg reader error "
-                f"{camera.camera_id}: {error}"
+                f"⚠️ RTSP OpenCV reader error | {camera.camera_id} | {error}",
+                flush=True,
             )
-
     finally:
-        if camera.ffmpeg_process is process:
+        if camera.rtsp_capture is capture:
             camera.ffmpeg_stream_ready = False
 
-def _start_ffmpeg_rtsp(camera):
-    source = str(camera.source).strip()
 
+def _start_ffmpeg_rtsp(camera):
+    """Start the proven OpenCV/FFmpeg RTSP backend in a dedicated reader."""
+    source = str(camera.source).strip()
     camera.last_ffmpeg_frame_time = 0.0
 
     if camera.ffmpeg_frame_lock is None:
         camera.ffmpeg_frame_lock = threading.Lock()
 
-    camera.ffmpeg_stop_event = (
-        threading.Event()
-    )
-
-    command = [
-        "ffmpeg",
-
-        "-hide_banner",
-        "-loglevel",
-        "error",
-
-        "-rtsp_transport",
-        "tcp",
-
-        "-fflags",
-        "nobuffer",
-
-        "-flags",
-        "low_delay",
-
-        "-i",
-        source,
-
-        "-an",
-
-        "-f",
-        "image2pipe",
-
-        "-vcodec",
-        "mjpeg",
-
-        "-q:v",
-        "5",
-
-        "pipe:1",
-    ]
+    # The earlier standalone OpenCV test verified this exact backend and TCP
+    # transport at ~25 FPS with changing frames for PHONE-CAM-001.
+    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
     print(
-        f"🎥 Starting FFmpeg RTSP reader: "
-        f"{camera.camera_id}"
+        f"🎥 Opening OpenCV RTSP capture: {camera.camera_id}",
+        flush=True,
     )
+
+    capture = None
+    open_timeout = getattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC", None)
+    read_timeout = getattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC", None)
+    params = []
+    if open_timeout is not None and read_timeout is not None:
+        params = [int(open_timeout), 5000, int(read_timeout), 3000]
 
     try:
-        camera.ffmpeg_process = (
-            subprocess.Popen(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                bufsize=0,
-            )
-        )
-    except FileNotFoundError as error:
-        camera.ffmpeg_process = None
-        camera.ffmpeg_stop_event = None
-        camera.ffmpeg_started_at = 0.0
+        if params:
+            capture = cv2.VideoCapture(source, cv2.CAP_FFMPEG, params)
+        else:
+            capture = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+    except (TypeError, cv2.error):
+        # Compatibility fallback for OpenCV builds that do not accept timeout
+        # parameters in the VideoCapture constructor.
+        capture = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
 
-        raise RuntimeError(
-            "FFmpeg executable was not found. "
-            "Install FFmpeg and make sure "
-            "the ffmpeg command works in PowerShell."
-        ) from error
+    # The standalone validation used this plain CAP_FFMPEG constructor and
+    # confirmed that it reads changing phone-camera frames at about 25 FPS.
+    # Fall back to that exact working mode if timeout parameters prevent open.
+    if capture is None or not capture.isOpened():
+        if capture is not None:
+            try:
+                capture.release()
+            except Exception:
+                pass
+        capture = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
 
+    if capture is None or not capture.isOpened():
+        if capture is not None:
+            capture.release()
+        camera.rtsp_capture = None
+        camera.ffmpeg_stream_ready = False
+        print(f"❌ OpenCV could not open RTSP camera: {camera.camera_id}", flush=True)
+        return False
+
+    try:
+        capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    except Exception:
+        pass
+
+    camera.rtsp_capture = capture
+    camera.ffmpeg_process = None
+    camera.ffmpeg_stop_event = threading.Event()
     camera.ffmpeg_started_at = time.monotonic()
+    camera.ffmpeg_stream_ready = False
 
-    camera.ffmpeg_reader_thread = (
-        threading.Thread(
-            target=_ffmpeg_reader,
-            args=(camera,),
-            daemon=True,
-            name=(
-                f"ffmpeg-{camera.camera_id}"
-            ),
-        )
+    camera.ffmpeg_reader_thread = threading.Thread(
+        target=_ffmpeg_reader,
+        args=(camera,),
+        daemon=True,
+        name=f"opencv-rtsp-{camera.camera_id}",
     )
-
     camera.ffmpeg_reader_thread.start()
 
+    # Both browser streams are published independently of the sequential
+    # multi-camera inference loop.
+    start_rtsp_render_worker(camera)
     return True
-
 
 def recover_rtsp_camera(camera):
     """
@@ -1390,16 +1454,10 @@ def recover_rtsp_camera(camera):
     ):
         return False
 
-    process = camera.ffmpeg_process
+    capture = camera.rtsp_capture
+    process_dead = capture is None or not capture.isOpened()
 
-    process_dead = (
-        process is None
-        or process.poll() is not None
-    )
-
-    reader_thread = (
-        camera.ffmpeg_reader_thread
-    )
+    reader_thread = camera.ffmpeg_reader_thread
 
     reader_dead = (
         reader_thread is not None
@@ -1419,8 +1477,8 @@ def recover_rtsp_camera(camera):
         not camera.ffmpeg_stream_ready
     )
 
-    # A new RTSP/FFmpeg process can take several seconds to negotiate the
-    # stream and deliver its first JPEG frame. Do not kill it during that window.
+    # A new RTSP capture can take several seconds to negotiate the stream
+    # and deliver its first frame. Do not restart it during that window.
     if (
         not process_dead
         and not reader_dead
@@ -1556,37 +1614,27 @@ def open_capture(camera):
 
 
 def read_camera_frame(camera):
-    """
-    Read one frame without blocking the main AI loop.
-
-    Local cameras/files use OpenCV directly.
-    RTSP cameras use the latest JPEG frame decoded
-    by the background FFmpeg reader.
-    """
-    if camera.ffmpeg_process is not None:
-        if (
-            camera.ffmpeg_frame_lock is None
-        ):
+    """Return the newest RTSP frame without blocking on network capture."""
+    if is_rtsp_source(camera.source):
+        if camera.ffmpeg_frame_lock is None:
             return False, None
-
         with camera.ffmpeg_frame_lock:
             frame = camera.latest_ffmpeg_frame
-
+            frame_time = camera.last_ffmpeg_frame_time
             if frame is None:
                 return False, None
-
+            if frame_time <= 0 or time.monotonic() - frame_time >= RTSP_STALE_FRAME_TIMEOUT:
+                return False, None
             return True, frame.copy()
 
     if camera.capture is None:
         return False, None
-
     return camera.capture.read()
-
 
 def reactivate_inactive_rtsp_cameras(cameras, active):
     """Retry RTSP cameras that failed startup or were removed from active.
 
-    A camera is returned to the processing list only after FFmpeg is alive,
+    A camera is returned to the processing list only after the OpenCV RTSP capture is alive,
     the reader has produced a recent frame, and that frame can be read.
     Other cameras continue processing independently.
     """
@@ -1596,9 +1644,9 @@ def reactivate_inactive_rtsp_cameras(cameras, active):
         if camera in active or not is_rtsp_source(camera.source):
             continue
 
-        process = camera.ffmpeg_process
+        capture = camera.rtsp_capture
         reader = camera.ffmpeg_reader_thread
-        process_alive = process is not None and process.poll() is None
+        process_alive = capture is not None and capture.isOpened()
         reader_alive = reader is not None and reader.is_alive()
         frame_is_fresh = (
             camera.last_ffmpeg_frame_time > 0
@@ -1626,7 +1674,7 @@ def reactivate_inactive_rtsp_cameras(cameras, active):
 
 
 def warmup_capture(camera):
-    if camera.ffmpeg_process is not None:
+    if is_rtsp_source(camera.source):
         print(
             f"🔄 Waiting for RTSP frames: "
             f"{camera.camera_id}"
@@ -2251,7 +2299,9 @@ class LiveStreamHandler(
                     self.wfile.flush()
 
                 time.sleep(
-                    0.06
+                    1.0 / RTSP_RENDER_FPS
+                    if is_rtsp_source(camera.source)
+                    else 0.06
                 )
 
         except (
@@ -3963,6 +4013,190 @@ def draw_vehicle_tracks(frame, camera):
         )
 
 
+def _render_rtsp_yolo_frame(camera, source_frame):
+    """Render cached AI results over the newest RTSP frame.
+
+    This function deliberately performs no model inference. Vehicle boxes
+    are moved with optical flow while the main runner schedules fresh YOLO
+    inference separately.
+    """
+    annotated = source_frame.copy()
+
+    if camera.overlay_lock is None:
+        camera.overlay_lock = threading.Lock()
+
+    with camera.overlay_lock:
+        advance_vehicle_tracks(camera, source_frame)
+        draw_vehicle_tracks(annotated, camera)
+
+        vehicle_count = int(camera.last_vehicle_count or 0)
+        average_confidence = float(camera.last_vehicle_average_confidence or 0.0)
+        congestion = camera.last_vehicle_congestion or "LOW"
+        accident_detected = bool(camera.accident_detected)
+        accident_severity = camera.accident_severity or "NONE"
+        accident_boxes = list(camera.accident_boxes or [])
+        emergency_boxes = list(camera.emergency_boxes or [])
+        inference_priority = camera.inference_priority or "NORMAL"
+        inference_interval = float(camera.inference_interval or RTSP_RENDER_INTERVAL)
+
+    # Cached accident boxes remain visible between model analyses.
+    for x1, y1, x2, y2, confidence in accident_boxes:
+        cv2.rectangle(annotated, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 3)
+        cv2.putText(
+            annotated,
+            f"ACCIDENT {float(confidence) * 100:.1f}%",
+            (int(x1), max(int(y1) - 10, 25)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (0, 0, 255),
+            2,
+            cv2.LINE_AA,
+        )
+
+    # Cached emergency boxes remain visible between model analyses.
+    for x1, y1, x2, y2, confidence, emergency_type in emergency_boxes:
+        cv2.rectangle(annotated, (int(x1), int(y1)), (int(x2), int(y2)), (0, 165, 255), 3)
+        cv2.putText(
+            annotated,
+            f"EMERGENCY {str(emergency_type).upper()} {float(confidence) * 100:.1f}%",
+            (int(x1), max(int(y1) - 10, 25)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 165, 255),
+            2,
+            cv2.LINE_AA,
+        )
+
+    (
+        state_congestion,
+        recommendation,
+        signal_time,
+        _state_emergency,
+        state_accident_severity,
+    ) = calculate_state(vehicle_count, accident_detected)
+
+    # Preserve the runner's congestion semantics while using the same
+    # recommendation and signal-time rules as the existing display.
+    if congestion in {"LOW", "MEDIUM", "HIGH"}:
+        state_congestion = congestion
+
+    annotated = draw_overlay(
+        annotated,
+        camera.camera_id,
+        vehicle_count,
+        state_congestion,
+        average_confidence,
+        recommendation,
+        signal_time,
+        accident_detected,
+        accident_severity or state_accident_severity,
+    )
+
+    cv2.putText(
+        annotated,
+        f"AI Priority : {inference_priority}",
+        (20, 345),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        annotated,
+        f"AI Interval : {inference_interval:.1f}s",
+        (20, 375),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.65,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+
+    return annotated
+
+
+def _rtsp_render_worker(camera, stop_event):
+    """Publish smooth RTSP YOLO frames at up to RTSP_RENDER_FPS."""
+    last_sequence = -1
+
+    while not stop_event.is_set():
+        loop_started = time.monotonic()
+        frame = None
+        sequence = last_sequence
+
+        frame_lock = camera.ffmpeg_frame_lock
+        if frame_lock is not None:
+            with frame_lock:
+                current = camera.latest_ffmpeg_frame
+                sequence = camera.ffmpeg_frame_sequence
+                if current is not None and sequence != last_sequence:
+                    frame = current.copy()
+
+        if frame is None:
+            stop_event.wait(0.01)
+            continue
+
+        try:
+            annotated = _render_rtsp_yolo_frame(camera, frame)
+            ok, encoded = cv2.imencode(
+                ".jpg",
+                annotated,
+                [cv2.IMWRITE_JPEG_QUALITY, 78],
+            )
+            if ok:
+                with camera.frame_lock:
+                    camera.latest_jpeg = encoded.tobytes()
+            last_sequence = sequence
+        except Exception as error:  # noqa: BLE001
+            print(
+                f"⚠️ RTSP render error | {camera.camera_id} | {error}",
+                flush=True,
+            )
+            last_sequence = sequence
+
+        elapsed = time.monotonic() - loop_started
+        stop_event.wait(max(0.0, RTSP_RENDER_INTERVAL - elapsed))
+
+
+def start_rtsp_render_worker(camera):
+    """Start one independent display worker for an RTSP camera."""
+    current = camera.rtsp_render_thread
+    if current is not None and current.is_alive():
+        return
+
+    if camera.overlay_lock is None:
+        camera.overlay_lock = threading.Lock()
+
+    stop_event = threading.Event()
+    worker = threading.Thread(
+        target=_rtsp_render_worker,
+        args=(camera, stop_event),
+        daemon=True,
+        name=f"rtsp-render-{camera.camera_id}",
+    )
+    camera.rtsp_render_stop_event = stop_event
+    camera.rtsp_render_thread = worker
+    worker.start()
+
+
+def stop_rtsp_render_worker(camera):
+    """Stop the per-camera RTSP display worker during camera shutdown."""
+    stop_event = camera.rtsp_render_stop_event
+    worker = camera.rtsp_render_thread
+
+    if stop_event is not None:
+        stop_event.set()
+
+    if worker is not None and worker is not threading.current_thread() and worker.is_alive():
+        worker.join(timeout=2.0)
+
+    if camera.rtsp_render_stop_event is stop_event:
+        camera.rtsp_render_stop_event = None
+    if camera.rtsp_render_thread is worker:
+        camera.rtsp_render_thread = None
+
+
 # =========================================================
 # MAIN
 # =========================================================
@@ -4183,7 +4417,7 @@ def main():
                 and camera.capture.isOpened()
             )
             or (
-                camera.ffmpeg_process is not None
+                camera.rtsp_capture is not None
                 and camera.ffmpeg_stream_ready
             )
         )
@@ -4383,12 +4617,14 @@ def main():
 
                 camera.consecutive_failures = 0
 
-                # Preserve the untouched source frame so the
-                # browser can show the original camera feed.
-                update_source_live_frame(
-                    camera,
-                    frame,
-                )
+                # RTSP source JPEGs are published directly by the FFmpeg
+                # reader at source frame rate. Non-RTSP sources retain the
+                # original main-loop publishing path.
+                if not is_rtsp_source(camera.source):
+                    update_source_live_frame(
+                        camera,
+                        frame,
+                    )
 
                 camera.frame_counter += 1
 
@@ -4434,24 +4670,21 @@ def main():
                                 )
                             )
 
-                        (
-                            vehicle_count,
-                            vehicle_breakdown,
-                            average_confidence,
-                            max_confidence,
-                            congestion,
-                        ) = cache_vehicle_results(
-                            camera,
-                            vehicle_results,
-                            vehicle_model,
-                        )
+                        with camera.overlay_lock:
+                            (
+                                vehicle_count,
+                                vehicle_breakdown,
+                                average_confidence,
+                                max_confidence,
+                                congestion,
+                            ) = cache_vehicle_results(
+                                camera,
+                                vehicle_results,
+                                vehicle_model,
+                            )
 
-                        camera.last_vehicle_inference = (
-                            processing_now
-                        )
-                        camera.last_inference_reason = (
-                            camera.inference_priority
-                        )
+                            camera.last_vehicle_inference = processing_now
+                            camera.last_inference_reason = camera.inference_priority
                         fresh_vehicle_inference = True
 
                     except Exception as error:
@@ -4524,7 +4757,7 @@ def main():
                                 accident_model(
                                     frame,
                                     imgsz=IMG_SIZE,
-                                    conf=ACCIDENT_CONFIDENCE,
+                                    conf=ACCIDENT_INFERENCE_CONFIDENCE,
                                     device=0,
                                     verbose=False,
                                 )
@@ -4581,80 +4814,115 @@ def main():
                         )
 
                         # =================================================
-                        # TEMPORAL ACCIDENT PERSISTENCE
+                        # SPATIAL + TEMPORAL ACCIDENT CONFIRMATION
                         # =================================================
-                        # A fresh Accident detection immediately activates
-                        # the alert. Short detector misses do not instantly
-                        # erase the confirmed state.
+                        # The previous implementation activated an incident
+                        # from one Accident box in one frame. That made a
+                        # single false positive sufficient to create an alert.
+                        # Propose at a lower confidence, reject a stronger
+                        # overlapping No-Accident label, then require the same
+                        # accident region in two of the last three analyses.
                         current_accident_boxes = []
+                        current_no_accident_boxes = []
                         current_max_accident_confidence = 0.0
+                        current_max_no_accident_confidence = 0.0
+
+                        model_names = accident_model.names
 
                         for result in accident_results:
-
-                            if (
-                                result.boxes is None
-                                or len(result.boxes) == 0
-                            ):
+                            if result.boxes is None or len(result.boxes) == 0:
                                 continue
 
                             for box in result.boxes:
-
-                                cls_id = int(
-                                    box.cls[0]
-                                )
-
-                                class_name = (
-                                    accident_model.names[
-                                        cls_id
-                                    ]
-                                )
-
-                                confidence = float(
-                                    box.conf[0]
-                                )
-
-                                if (
-                                    class_name == "Accident"
-                                    and confidence
-                                    >= ACCIDENT_CONFIDENCE
-                                ):
-
-                                    x1, y1, x2, y2 = map(
-                                        int,
-                                        box.xyxy[0],
+                                cls_id = int(box.cls[0])
+                                if isinstance(model_names, dict):
+                                    class_name = model_names.get(cls_id, "")
+                                else:
+                                    class_name = (
+                                        model_names[cls_id]
+                                        if 0 <= cls_id < len(model_names)
+                                        else ""
                                     )
 
-                                    current_accident_boxes.append(
-                                        (
-                                            x1,
-                                            y1,
-                                            x2,
-                                            y2,
-                                            confidence,
-                                        )
-                                    )
+                                normalized_label = normalize_accident_label(class_name)
+                                confidence = float(box.conf[0])
+                                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                                detection_box = (x1, y1, x2, y2, confidence)
 
+                                if normalized_label == "accident":
+                                    current_accident_boxes.append(detection_box)
                                     current_max_accident_confidence = max(
                                         current_max_accident_confidence,
                                         confidence,
                                     )
+                                elif normalized_label == "no_accident":
+                                    current_no_accident_boxes.append(detection_box)
+                                    current_max_no_accident_confidence = max(
+                                        current_max_no_accident_confidence,
+                                        confidence,
+                                    )
 
-                        if current_accident_boxes:
+                        # If both classes predict the same region, prefer the
+                        # negative class only when it is meaningfully stronger.
+                        filtered_accident_boxes = []
+                        for accident_box in current_accident_boxes:
+                            contradicted = any(
+                                box_iou_xyxy(accident_box, no_accident_box) >= 0.30
+                                and no_accident_box[4]
+                                >= accident_box[4] + ACCIDENT_NEGATIVE_CLASS_MARGIN
+                                for no_accident_box in current_no_accident_boxes
+                            )
+                            if (
+                                accident_box[4] >= ACCIDENT_CONFIRM_CONFIDENCE
+                                and not contradicted
+                            ):
+                                filtered_accident_boxes.append(accident_box)
+
+                        current_accident_boxes = filtered_accident_boxes
+                        current_max_accident_confidence = max(
+                            (box[4] for box in current_accident_boxes),
+                            default=0.0,
+                        )
+
+                        if camera.accident_candidate_history is None:
+                            camera.accident_candidate_history = []
+
+                        previous_history = camera.accident_candidate_history[
+                            -(ACCIDENT_CONFIRMATION_WINDOW - 1):
+                        ]
+                        accident_consensus = has_temporal_accident_consensus(
+                            current_accident_boxes,
+                            previous_history,
+                        )
+
+                        camera.accident_candidate_history = (
+                            previous_history + [current_accident_boxes]
+                        )[-ACCIDENT_CONFIRMATION_WINDOW:]
+
+                        if current_accident_boxes and not accident_consensus:
+                            print(
+                                "[ACCIDENT CANDIDATE] "
+                                f"camera={camera.camera_id} "
+                                f"confidence={current_max_accident_confidence:.3f} "
+                                f"negative_confidence={current_max_no_accident_confidence:.3f} "
+                                "confirmation=1/2"
+                            )
+
+                        if accident_consensus:
                             camera.accident_detected = True
                             camera.accident_severity = "HIGH"
                             camera.accident_missed_analyses = 0
                             camera.accident_candidate_confidence = (
                                 current_max_accident_confidence
                             )
-                            camera.accident_boxes = (
-                                current_accident_boxes
-                            )
+                            camera.accident_boxes = current_accident_boxes
 
                             print(
                                 "[ACCIDENT CONFIRMED] "
                                 f"camera={camera.camera_id} "
                                 f"confidence="
-                                f"{current_max_accident_confidence:.3f}"
+                                f"{current_max_accident_confidence:.3f} "
+                                "evidence=2/3"
                             )
 
                         elif camera.accident_detected:
@@ -4683,7 +4951,7 @@ def main():
                                 print(
                                     "[ACCIDENT CLEARED] "
                                     f"camera={camera.camera_id} "
-                                    "no fresh accident evidence"
+                                    "no fresh confirmed accident evidence"
                                 )
 
                         else:
@@ -4896,120 +5164,7 @@ def main():
                 # -----------------------------------------
                 poll_ai_emergency_recovery()
 
-                # -----------------------------------------
-                # Vehicle Detection / Cached State
-                # -----------------------------------------
-
-                annotated_frame = (
-                    frame.copy()
-                )
-
-                # Refresh optical-flow tracks after a new YOLO inference;
-                # otherwise move existing boxes with the current video frame.
-                # This keeps annotations visible between inference cycles without
-                # leaving boxes frozen at their old positions.
-                if fresh_vehicle_inference:
-                    refresh_vehicle_tracks(
-                        camera,
-                        frame,
-                        vehicle_results,
-                        vehicle_model,
-                    )
-                else:
-                    advance_vehicle_tracks(camera, frame)
-
-                draw_vehicle_tracks(
-                    annotated_frame,
-                    camera,
-                )
-
-
-                # -----------------------------------------
-                # Cached Accident Overlay
-                # -----------------------------------------
-
-                for (
-                    x1,
-                    y1,
-                    x2,
-                    y2,
-                    confidence,
-                ) in (
-                    camera.accident_boxes or []
-                ):
-
-                    cv2.rectangle(
-                        annotated_frame,
-                        (x1, y1),
-                        (x2, y2),
-                        (0, 0, 255),
-                        3,
-                    )
-
-                    cv2.putText(
-                        annotated_frame,
-                        (
-                            "ACCIDENT "
-                            f"{confidence * 100:.1f}%"
-                        ),
-                        (
-                            x1,
-                            max(
-                                y1 - 10,
-                                25,
-                            ),
-                        ),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.8,
-                        (0, 0, 255),
-                        2,
-                    )
-
-                # -----------------------------------------
-                # Emergency Vehicle Overlay
-                # -----------------------------------------
-
-                for (
-                    x1,
-                    y1,
-                    x2,
-                    y2,
-                    confidence,
-                    emergency_type,
-                ) in (
-                    camera.emergency_boxes
-                    or []
-                ):
-
-                    cv2.rectangle(
-                        annotated_frame,
-                        (x1, y1),
-                        (x2, y2),
-                        (0, 165, 255),
-                        3,
-                    )
-
-                    cv2.putText(
-                        annotated_frame,
-                        (
-                            "EMERGENCY "
-                            f"{emergency_type.upper()} "
-                            f"{confidence * 100:.1f}%"
-                        ),
-                        (
-                            x1,
-                            max(y1 - 10, 25),
-                        ),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.7,
-                        (0, 165, 255),
-                        2,
-                    )
-
-                # -----------------------------------------
-                # Traffic State
-                # -----------------------------------------
-
+                # Calculate state for backend telemetry regardless of stream type.
                 (
                     congestion,
                     recommendation,
@@ -5021,64 +5176,186 @@ def main():
                     accident_detected,
                 )
 
+                if is_rtsp_source(camera.source):
+                    # The RTSP renderer consumes every fresh decoded frame
+                    # independently. Only reset optical-flow tracks when YOLO
+                    # has produced a fresh detection batch.
+                    if fresh_vehicle_inference:
+                        with camera.overlay_lock:
+                            refresh_vehicle_tracks(
+                                camera,
+                                frame,
+                                vehicle_results,
+                                vehicle_model,
+                            )
+                else:
+                    # -----------------------------------------
+                    # Vehicle Detection / Cached State
+                    # -----------------------------------------
 
-                # -----------------------------------------
-                # Draw Overlay
-                # -----------------------------------------
-
-                annotated_frame = (
-                    draw_overlay(
-                        annotated_frame,
-                        camera.camera_id,
-                        vehicle_count,
-                        congestion,
-                        average_confidence,
-                        recommendation,
-                        signal_time,
-                        accident_detected,
-                        accident_severity,
+                    annotated_frame = (
+                        frame.copy()
                     )
-                )
 
-                # -----------------------------------------
-                # Phase 27 priority overlay
-                # -----------------------------------------
+                    # Refresh optical-flow tracks after a new YOLO inference;
+                    # otherwise move existing boxes with the current video frame.
+                    # This keeps annotations visible between inference cycles without
+                    # leaving boxes frozen at their old positions.
+                    if fresh_vehicle_inference:
+                        refresh_vehicle_tracks(
+                            camera,
+                            frame,
+                            vehicle_results,
+                            vehicle_model,
+                        )
+                    else:
+                        advance_vehicle_tracks(camera, frame)
 
-                cv2.putText(
-                    annotated_frame,
-                    (
-                        "AI Priority : "
-                        f"{camera.inference_priority}"
-                    ),
-                    (20, 345),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    (255, 255, 255),
-                    2,
-                )
-
-                cv2.putText(
-                    annotated_frame,
-                    (
-                        "AI Interval : "
-                        f"{camera.inference_interval:.1f}s"
-                    ),
-                    (20, 375),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.65,
-                    (255, 255, 255),
-                    2,
-                )
+                    draw_vehicle_tracks(
+                        annotated_frame,
+                        camera,
+                    )
 
 
-                # -----------------------------------------
-                # Update Live Stream
-                # -----------------------------------------
+                    # -----------------------------------------
+                    # Cached Accident Overlay
+                    # -----------------------------------------
 
-                update_live_frame(
-                    camera,
-                    annotated_frame,
-                )
+                    for (
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                        confidence,
+                    ) in (
+                        camera.accident_boxes or []
+                    ):
+
+                        cv2.rectangle(
+                            annotated_frame,
+                            (x1, y1),
+                            (x2, y2),
+                            (0, 0, 255),
+                            3,
+                        )
+
+                        cv2.putText(
+                            annotated_frame,
+                            (
+                                "ACCIDENT "
+                                f"{confidence * 100:.1f}%"
+                            ),
+                            (
+                                x1,
+                                max(
+                                    y1 - 10,
+                                    25,
+                                ),
+                            ),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.8,
+                            (0, 0, 255),
+                            2,
+                        )
+
+                    # -----------------------------------------
+                    # Emergency Vehicle Overlay
+                    # -----------------------------------------
+
+                    for (
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                        confidence,
+                        emergency_type,
+                    ) in (
+                        camera.emergency_boxes
+                        or []
+                    ):
+
+                        cv2.rectangle(
+                            annotated_frame,
+                            (x1, y1),
+                            (x2, y2),
+                            (0, 165, 255),
+                            3,
+                        )
+
+                        cv2.putText(
+                            annotated_frame,
+                            (
+                                "EMERGENCY "
+                                f"{emergency_type.upper()} "
+                                f"{confidence * 100:.1f}%"
+                            ),
+                            (
+                                x1,
+                                max(y1 - 10, 25),
+                            ),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.7,
+                            (0, 165, 255),
+                            2,
+                        )
+
+                    # -----------------------------------------
+                    # Draw Overlay
+                    # -----------------------------------------
+
+                    annotated_frame = (
+                        draw_overlay(
+                            annotated_frame,
+                            camera.camera_id,
+                            vehicle_count,
+                            congestion,
+                            average_confidence,
+                            recommendation,
+                            signal_time,
+                            accident_detected,
+                            accident_severity,
+                        )
+                    )
+
+                    # -----------------------------------------
+                    # Phase 27 priority overlay
+                    # -----------------------------------------
+
+                    cv2.putText(
+                        annotated_frame,
+                        (
+                            "AI Priority : "
+                            f"{camera.inference_priority}"
+                        ),
+                        (20, 345),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        (255, 255, 255),
+                        2,
+                    )
+
+                    cv2.putText(
+                        annotated_frame,
+                        (
+                            "AI Interval : "
+                            f"{camera.inference_interval:.1f}s"
+                        ),
+                        (20, 375),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.65,
+                        (255, 255, 255),
+                        2,
+                    )
+
+
+                    # -----------------------------------------
+                    # Update Live Stream
+                    # -----------------------------------------
+
+                    update_live_frame(
+                        camera,
+                        annotated_frame,
+                    )
 
 
                 # -----------------------------------------
@@ -5147,14 +5424,28 @@ def main():
                 # -----------------------------------------
 
                 if not HEADLESS:
-
-                    cv2.imshow(
-                        (
-                            "TrafficMind AI - "
-                            f"{camera.camera_id}"
-                        ),
-                        annotated_frame,
-                    )
+                    if is_rtsp_source(camera.source):
+                        with camera.frame_lock:
+                            preview_jpeg = camera.latest_jpeg
+                        preview_frame = None
+                        if preview_jpeg:
+                            preview_frame = cv2.imdecode(
+                                np.frombuffer(preview_jpeg, dtype=np.uint8),
+                                cv2.IMREAD_COLOR,
+                            )
+                        if preview_frame is not None:
+                            cv2.imshow(
+                                f"TrafficMind AI - {camera.camera_id}",
+                                preview_frame,
+                            )
+                    else:
+                        cv2.imshow(
+                            (
+                                "TrafficMind AI - "
+                                f"{camera.camera_id}"
+                            ),
+                            annotated_frame,
+                        )
 
 
             if not active:
